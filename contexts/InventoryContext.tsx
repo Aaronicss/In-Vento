@@ -1,30 +1,50 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { supabase } from '../lib/supabase';
+
+// Icon mapping for converting string keys to image sources
+export const iconMap: { [key: string]: any } = {
+  burgerbun: require('../assets/burgerbun.png'),
+  beef: require('../assets/beef.png'),
+  lettuce: require('../assets/lettuce.png'),
+  cheese: require('../assets/cheese.png'),
+  tomato: require('../assets/tomato.png'),
+  onion: require('../assets/onion.png'),
+  burger: require('../assets/burger.png'),
+  drink: require('../assets/drink.png'),
+};
 
 export interface InventoryItem {
   id: string;
   name: string;
-  icon: any;
+  icon: string; // Icon key (e.g., "burger", "cheese")
   count: number;
   progress: number; // 0.0 to 1.0 representing freshness/shelf life
   timeRemaining: string; // e.g., "1d 2hrs"
   status: 'Fresh' | 'Warning'; // Status based on progress
   createdAt: Date;
   expiresAt: Date;
-  userId?: string; // For future Supabase integration
+  userId: string;
 }
+
+// Helper to get icon source from icon key
+export const getIconSource = (iconKey: string): any => {
+  return iconMap[iconKey.toLowerCase()] || iconMap.burger;
+};
 
 interface InventoryContextType {
   inventoryItems: InventoryItem[];
+  loading: boolean;
   addInventoryItem: (
     name: string,
-    icon: any,
+    icon: string,
     count: number,
     shelfLifeDays: number
-  ) => void;
-  updateInventoryItem: (itemId: string, updates: Partial<InventoryItem>) => void;
-  removeInventoryItem: (itemId: string) => void;
-  incrementCount: (itemId: string) => void;
-  decrementCount: (itemId: string) => void;
+  ) => Promise<void>;
+  updateInventoryItem: (itemId: string, updates: Partial<InventoryItem>) => Promise<void>;
+  removeInventoryItem: (itemId: string) => Promise<void>;
+  incrementCount: (itemId: string) => Promise<void>;
+  decrementCount: (itemId: string) => Promise<void>;
+  refreshInventory: () => Promise<void>;
 }
 
 const InventoryContext = createContext<InventoryContextType | undefined>(undefined);
@@ -61,86 +81,197 @@ const getStatus = (progress: number): 'Fresh' | 'Warning' => {
 
 export function InventoryProvider({ children }: { children: ReactNode }) {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const addInventoryItem = (
+  // Fetch inventory items from Supabase
+  const fetchInventoryItems = async () => {
+    try {
+      setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        setInventoryItems([]);
+        setLoading(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching inventory items:', error);
+        setLoading(false);
+        return;
+      }
+
+      // Convert Supabase data to InventoryItem format
+      const items: InventoryItem[] = (data || []).map((item) => {
+        const createdAt = new Date(item.created_at);
+        const expiresAt = new Date(item.expires_at);
+        const progress = calculateProgress(createdAt, expiresAt);
+        const timeRemaining = calculateTimeRemaining(expiresAt);
+        const status = getStatus(progress);
+
+        return {
+          id: item.id,
+          name: item.name,
+          icon: item.icon,
+          count: item.count,
+          progress,
+          timeRemaining,
+          status,
+          createdAt,
+          expiresAt,
+          userId: item.user_id,
+        };
+      });
+
+      setInventoryItems(items);
+    } catch (error) {
+      console.error('Error in fetchInventoryItems:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load inventory items on mount and when auth state changes
+  useEffect(() => {
+    fetchInventoryItems();
+
+    // Subscribe to auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      fetchInventoryItems();
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // Note: Progress, time remaining, and status are calculated on-demand in the UI
+  // to avoid constant updates that make items hard to read
+
+  const addInventoryItem = async (
     name: string,
-    icon: any,
+    icon: string,
     count: number,
     shelfLifeDays: number
   ) => {
-    const createdAt = new Date();
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + shelfLifeDays);
-    
-    const progress = calculateProgress(createdAt, expiresAt);
-    const timeRemaining = calculateTimeRemaining(expiresAt);
-    const status = getStatus(progress);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
 
-    const newItem: InventoryItem = {
-      id: `inventory-${Date.now()}`,
-      name,
-      icon,
-      count,
-      progress,
-      timeRemaining,
-      status,
-      createdAt,
-      expiresAt,
-    };
-    
-    setInventoryItems((prev) => [...prev, newItem]);
+      const createdAt = new Date();
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + shelfLifeDays);
+
+      const { data, error } = await supabase
+        .from('inventory_items')
+        .insert([
+          {
+            user_id: user.id,
+            name,
+            icon,
+            count,
+            created_at: createdAt.toISOString(),
+            expires_at: expiresAt.toISOString(),
+          },
+        ])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error adding inventory item:', error);
+        throw error;
+      }
+
+      // Refresh inventory items
+      await fetchInventoryItems();
+    } catch (error) {
+      console.error('Error in addInventoryItem:', error);
+      throw error;
+    }
   };
 
-  const updateInventoryItem = (itemId: string, updates: Partial<InventoryItem>) => {
-    setInventoryItems((prev) =>
-      prev.map((item) => {
-        if (item.id === itemId) {
-          const updated = { ...item, ...updates };
-          // Recalculate progress and status if expiration changed
-          if (updates.expiresAt || updates.createdAt) {
-            updated.progress = calculateProgress(
-              updated.createdAt,
-              updated.expiresAt
-            );
-            updated.timeRemaining = calculateTimeRemaining(updated.expiresAt);
-            updated.status = getStatus(updated.progress);
-          }
-          return updated;
-        }
-        return item;
-      })
-    );
+  const updateInventoryItem = async (itemId: string, updates: Partial<InventoryItem>) => {
+    try {
+      const updateData: any = {};
+
+      if (updates.name !== undefined) updateData.name = updates.name;
+      if (updates.icon !== undefined) updateData.icon = updates.icon;
+      if (updates.count !== undefined) updateData.count = updates.count;
+      if (updates.expiresAt !== undefined) updateData.expires_at = updates.expiresAt.toISOString();
+      if (updates.createdAt !== undefined) updateData.created_at = updates.createdAt.toISOString();
+
+      const { error } = await supabase
+        .from('inventory_items')
+        .update(updateData)
+        .eq('id', itemId);
+
+      if (error) {
+        console.error('Error updating inventory item:', error);
+        throw error;
+      }
+
+      // Refresh inventory items
+      await fetchInventoryItems();
+    } catch (error) {
+      console.error('Error in updateInventoryItem:', error);
+      throw error;
+    }
   };
 
-  const removeInventoryItem = (itemId: string) => {
-    setInventoryItems((prev) => prev.filter((item) => item.id !== itemId));
+  const removeInventoryItem = async (itemId: string) => {
+    try {
+      const { error } = await supabase
+        .from('inventory_items')
+        .delete()
+        .eq('id', itemId);
+
+      if (error) {
+        console.error('Error removing inventory item:', error);
+        throw error;
+      }
+
+      // Refresh inventory items
+      await fetchInventoryItems();
+    } catch (error) {
+      console.error('Error in removeInventoryItem:', error);
+      throw error;
+    }
   };
 
-  const incrementCount = (itemId: string) => {
-    setInventoryItems((prev) =>
-      prev.map((item) =>
-        item.id === itemId ? { ...item, count: item.count + 1 } : item
-      )
-    );
+  const incrementCount = async (itemId: string) => {
+    const item = inventoryItems.find((i) => i.id === itemId);
+    if (item) {
+      await updateInventoryItem(itemId, { count: item.count + 1 });
+    }
   };
 
-  const decrementCount = (itemId: string) => {
-    setInventoryItems((prev) =>
-      prev.map((item) =>
-        item.id === itemId ? { ...item, count: Math.max(0, item.count - 1) } : item
-      )
-    );
+  const decrementCount = async (itemId: string) => {
+    const item = inventoryItems.find((i) => i.id === itemId);
+    if (item) {
+      await updateInventoryItem(itemId, { count: Math.max(0, item.count - 1) });
+    }
   };
 
   return (
     <InventoryContext.Provider
       value={{
         inventoryItems,
+        loading,
         addInventoryItem,
         updateInventoryItem,
         removeInventoryItem,
         incrementCount,
         decrementCount,
+        refreshInventory: fetchInventoryItems,
       }}
     >
       {children}

@@ -1,30 +1,76 @@
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { ProgressBar } from 'react-native-paper';
 import { useOrders } from '../../contexts/OrdersContext';
+import { supabase } from '../../lib/supabase';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { orders, removeOrder, updateOrderProgress } = useOrders();
+  const { orders, loading, removeOrder, updateOrderProgress } = useOrders();
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [processingOrders, setProcessingOrders] = useState<Set<string>>(new Set());
+  const [loggingOut, setLoggingOut] = useState(false);
 
-  // Update time every second to recalculate progress
+  // Handle logout
+  const handleLogout = async () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            setLoggingOut(true);
+            try {
+              const { error } = await supabase.auth.signOut();
+              if (error) throw error;
+              router.replace('/login');
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Failed to logout');
+              setLoggingOut(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Update time every second for UI, but sync to database less frequently
   useEffect(() => {
-    const interval = setInterval(() => {
+    // Update UI every second
+    const uiInterval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+
+    // Sync progress to database every 30 seconds (less frequent to reduce DB load)
+    const dbInterval = setInterval(() => {
+      if (orders.length === 0) return;
       const now = Date.now();
-      setCurrentTime(now);
-      
-      // Update progress for each order based on elapsed time
-      orders.forEach((order) => {
+      orders.forEach(async (order) => {
         const elapsedSeconds = (now - order.createdAt.getTime()) / 1000;
         const timeLimit = 300; // 5 minutes in seconds (adjust as needed)
         const newProgress = Math.max(0, 1 - elapsedSeconds / timeLimit);
-        updateOrderProgress(order.id, newProgress);
+        // Only update if progress changed significantly (more than 1%)
+        if (Math.abs(newProgress - order.progress) > 0.01) {
+          try {
+            await updateOrderProgress(order.id, newProgress);
+          } catch (error) {
+            console.error('Error updating order progress:', error);
+          }
+        }
       });
-    }, 1000);
+    }, 30000); // Update database every 30 seconds
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(uiInterval);
+      clearInterval(dbInterval);
+    };
   }, [orders, updateOrderProgress]);
 
   // Helper function to get icon based on item name
@@ -40,6 +86,14 @@ export default function HomeScreen() {
     return require('../../assets/burger.png');
   };
 
+  // Helper function to calculate current progress based on elapsed time
+  const calculateCurrentProgress = (order: any) => {
+    const now = Date.now();
+    const elapsedSeconds = (now - order.createdAt.getTime()) / 1000;
+    const timeLimit = 300; // 5 minutes in seconds (adjust as needed)
+    return Math.max(0, 1 - elapsedSeconds / timeLimit);
+  };
+
   // Helper function to get progress bar color based on progress
   // Progress decreases from 1.0 to 0.0, so colors are reversed
   const getProgressColor = (progress: number) => {
@@ -52,6 +106,19 @@ export default function HomeScreen() {
     <ScrollView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
+        <View style={styles.headerTop}>
+          <TouchableOpacity
+            style={[styles.logoutButton, loggingOut && styles.buttonDisabled]}
+            onPress={handleLogout}
+            disabled={loggingOut}
+          >
+            {loggingOut ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.logoutButtonText}>Logout</Text>
+            )}
+          </TouchableOpacity>
+        </View>
         <Text style={styles.title}>IN-VENTO:</Text>
         <Text style={styles.subtitle}>Intelligent Inventory System</Text>
       </View>
@@ -78,19 +145,26 @@ export default function HomeScreen() {
       {/* Orders Section */}
       <Text style={styles.sectionTitle}>ORDERS</Text>
 
-      {orders.length === 0 ? (
+      {loading ? (
+        <View style={styles.emptyOrders}>
+          <ActivityIndicator size="large" color="#4CAF50" />
+          <Text style={styles.emptyOrdersText}>Loading orders...</Text>
+        </View>
+      ) : orders.length === 0 ? (
         <View style={styles.emptyOrders}>
           <Text style={styles.emptyOrdersText}>No orders yet. Tap "TAKE ORDER" to create one!</Text>
         </View>
       ) : (
-        orders.map((order) => (
-          <View key={order.id} style={styles.orderSection}>
-            <Text style={styles.tableTitle}>TABLE #{order.tableNumber}</Text>
-            <ProgressBar 
-              progress={order.progress} 
-              color={getProgressColor(order.progress)} 
-              style={styles.progressBar} 
-            />
+        orders.map((order) => {
+          const currentProgress = calculateCurrentProgress(order);
+          return (
+            <View key={order.id} style={styles.orderSection}>
+              <Text style={styles.tableTitle}>TABLE #{order.tableNumber}</Text>
+              <ProgressBar 
+                progress={currentProgress} 
+                color={getProgressColor(currentProgress)} 
+                style={styles.progressBar} 
+              />
             {order.items.map((item, itemIndex) => (
               <View key={item.id} style={styles.itemRow}>
                 <Image source={getItemIcon(item.name)} style={styles.itemIcon} />
@@ -99,16 +173,35 @@ export default function HomeScreen() {
                 </Text>
                 {itemIndex === order.items.length - 1 && (
                   <TouchableOpacity 
-                    style={styles.doneButton}
-                    onPress={() => removeOrder(order.id)}
+                    style={[styles.doneButton, processingOrders.has(order.id) && styles.buttonDisabled]}
+                    onPress={async () => {
+                      setProcessingOrders((prev) => new Set(prev).add(order.id));
+                      try {
+                        await removeOrder(order.id);
+                      } catch (error) {
+                        console.error('Error removing order:', error);
+                      } finally {
+                        setProcessingOrders((prev) => {
+                          const next = new Set(prev);
+                          next.delete(order.id);
+                          return next;
+                        });
+                      }
+                    }}
+                    disabled={processingOrders.has(order.id)}
                   >
-                    <Text style={styles.doneText}>Done</Text>
+                    {processingOrders.has(order.id) ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.doneText}>Done</Text>
+                    )}
                   </TouchableOpacity>
                 )}
               </View>
             ))}
-          </View>
-        ))
+            </View>
+          );
+        })
       )}
 
       {/* Inventory Alerts */}
@@ -141,6 +234,28 @@ const styles = StyleSheet.create({
     alignItems: 'center', 
     marginTop: 30,
     marginBottom: 10,
+  },
+  headerTop: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 10,
+  },
+  logoutButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#FF5252',
+    borderRadius: 8,
+    shadowColor: '#FF5252',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  logoutButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 14,
   },
   title: { 
     fontSize: 28, 
@@ -338,5 +453,8 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
 });

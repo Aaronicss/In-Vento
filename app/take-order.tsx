@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useOrders, OrderItem } from '../contexts/OrdersContext';
 
 export default function TakeOrderScreen() {
@@ -29,7 +29,9 @@ export default function TakeOrderScreen() {
     );
   };
 
-  const handleConfirm = () => {
+  const [loading, setLoading] = useState(false);
+
+  const handleConfirm = async () => {
     // Validation
     if (!tableNumber || isNaN(Number(tableNumber)) || Number(tableNumber) <= 0) {
       Alert.alert('Invalid Table Number', 'Please enter a valid table number.');
@@ -42,15 +44,22 @@ export default function TakeOrderScreen() {
       return;
     }
 
-    // Add order to context
-    addOrder(Number(tableNumber), validItems);
-    
-    Alert.alert('Order Added', `Order for Table #${tableNumber} has been added!`, [
-      {
-        text: 'OK',
-        onPress: () => router.back(),
-      },
-    ]);
+    setLoading(true);
+    try {
+      // Add order to context
+      await addOrder(Number(tableNumber), validItems);
+      
+      Alert.alert('Order Added', `Order for Table #${tableNumber} has been added!`, [
+        {
+          text: 'OK',
+          onPress: () => router.back(),
+        },
+      ]);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to add order');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -127,8 +136,16 @@ export default function TakeOrderScreen() {
       </View>
 
       {/* Confirm Button */}
-      <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
-        <Text style={styles.confirmButtonText}>CONFIRM ORDER</Text>
+      <TouchableOpacity 
+        style={[styles.confirmButton, loading && styles.buttonDisabled]} 
+        onPress={handleConfirm}
+        disabled={loading}
+      >
+        {loading ? (
+          <ActivityIndicator color="#FFFFFF" />
+        ) : (
+          <Text style={styles.confirmButtonText}>CONFIRM ORDER</Text>
+        )}
       </TouchableOpacity>
 
       {/* Cancel Button */}
@@ -299,5 +316,8 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     color: '#666',
     fontSize: 14,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
 });

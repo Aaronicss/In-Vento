@@ -18,12 +18,13 @@ const availableIcons: { [key: string]: any } = {
 export default function AddInventoryItemScreen() {
   const router = useRouter();
   const { addInventoryItem } = useInventory();
+  const [loading, setLoading] = useState(false);
   const [itemName, setItemName] = useState('');
   const [count, setCount] = useState('1');
   const [shelfLifeDays, setShelfLifeDays] = useState('7');
   const [iconKey, setIconKey] = useState('burger');
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     // Validation
     if (!itemName.trim()) {
       Alert.alert('Invalid Item Name', 'Please enter an item name.');
@@ -42,18 +43,21 @@ export default function AddInventoryItemScreen() {
       return;
     }
 
-    // Get icon (default to burger if not found)
-    const icon = availableIcons[iconKey.toLowerCase()] || availableIcons.burger;
-
-    // Add item to inventory
-    addInventoryItem(itemName.trim().toUpperCase(), icon, countNum, shelfLifeNum);
-
-    Alert.alert('Item Added', `${itemName} has been added to inventory!`, [
-      {
-        text: 'OK',
-        onPress: () => router.back(),
-      },
-    ]);
+    setLoading(true);
+    try {
+      // Add item to inventory (pass icon key as string)
+      await addInventoryItem(itemName.trim().toUpperCase(), iconKey.toLowerCase(), countNum, shelfLifeNum);
+      Alert.alert('Item Added', `${itemName} has been added to inventory!`, [
+        {
+          text: 'OK',
+          onPress: () => router.back(),
+        },
+      ]);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to add inventory item');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

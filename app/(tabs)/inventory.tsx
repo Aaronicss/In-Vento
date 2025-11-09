@@ -1,68 +1,76 @@
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ProgressBar } from "react-native-paper";
-import { useInventory } from "../../contexts/InventoryContext";
+import { useInventory, getIconSource } from "../../contexts/InventoryContext";
 
 export default function InventoryScreen() {
   const router = useRouter();
   const {
     inventoryItems,
+    loading,
     incrementCount,
     decrementCount,
-    updateInventoryItem,
   } = useInventory();
-  const [currentTime, setCurrentTime] = useState(Date.now());
+  const [updatingItems, setUpdatingItems] = useState<Set<string>>(new Set());
 
-  // Update time every second to recalculate progress and time remaining
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now();
-      setCurrentTime(now);
+  // Helper functions to calculate progress, time remaining, and status
+  const calculateProgress = useCallback((createdAt: Date, expiresAt: Date): number => {
+    const now = Date.now();
+    const created = createdAt.getTime();
+    const expires = expiresAt.getTime();
+    if (now >= expires) return 0;
+    if (now <= created) return 1;
+    return (expires - now) / (expires - created);
+  }, []);
 
-      // Update progress and time remaining for each item
-      inventoryItems.forEach((item) => {
-        const progress = (item.expiresAt.getTime() - now) / (item.expiresAt.getTime() - item.createdAt.getTime());
-        const newProgress = Math.max(0, Math.min(1, progress));
-        
-        // Calculate time remaining
-        const diff = item.expiresAt.getTime() - now;
-        let timeRemaining = 'Expired';
-        if (diff > 0) {
-          const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-          const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-          timeRemaining = days > 0 ? `${days}d ${hours}hrs` : `${hours}hrs`;
-        }
+  const calculateTimeRemaining = useCallback((expiresAt: Date): string => {
+    const now = Date.now();
+    const diff = expiresAt.getTime() - now;
+    if (diff <= 0) return 'Expired';
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    if (days > 0) return `${days}d ${hours}hrs`;
+    return `${hours}hrs`;
+  }, []);
 
-        const status = newProgress > 0.5 ? 'Fresh' : 'Warning';
-
-        // Only update if changed
-        if (
-          item.progress !== newProgress ||
-          item.timeRemaining !== timeRemaining ||
-          item.status !== status
-        ) {
-          updateInventoryItem(item.id, {
-            progress: newProgress,
-            timeRemaining,
-            status,
-          });
-        }
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [inventoryItems, updateInventoryItem]);
+  const getStatus = useCallback((progress: number): 'Fresh' | 'Warning' => {
+    return progress > 0.5 ? 'Fresh' : 'Warning';
+  }, []);
 
   // Helper function to get progress bar color based on status
-  const getProgressColor = (status: 'Fresh' | 'Warning') => {
+  const getProgressColor = useCallback((status: 'Fresh' | 'Warning') => {
     return status === 'Fresh' ? '#4CAF50' : '#FF9800';
-  };
+  }, []);
+
+  // Calculate display values for all items once and memoize them
+  // This ensures values are only calculated when inventoryItems change, not on every render
+  const itemsWithDisplayData = useMemo(() => {
+    return inventoryItems.map((item) => {
+      const progress = calculateProgress(item.createdAt, item.expiresAt);
+      const timeRemaining = calculateTimeRemaining(item.expiresAt);
+      const status = getStatus(progress);
+      return {
+        ...item,
+        displayProgress: progress,
+        displayTimeRemaining: timeRemaining,
+        displayStatus: status,
+      };
+    });
+  }, [inventoryItems, calculateProgress, calculateTimeRemaining, getStatus]);
 
   return (
     <ScrollView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
+        <View style={styles.headerTop}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.push('/(tabs)/home')}
+          >
+            <Text style={styles.backButtonText}>← Back</Text>
+          </TouchableOpacity>
+        </View>
         <Text style={styles.title}>IN-VENTO:</Text>
         <Text style={styles.subtitle}>Intelligent Inventory System</Text>
       </View>
@@ -89,53 +97,96 @@ export default function InventoryScreen() {
       {/* Inventory Items Section */}
       <Text style={styles.sectionTitle}>INVENTORY ITEMS</Text>
 
-      {inventoryItems.length === 0 ? (
+      {loading ? (
+        <View style={styles.emptyInventory}>
+          <ActivityIndicator size="large" color="#4CAF50" />
+          <Text style={styles.emptyInventoryText}>Loading inventory...</Text>
+        </View>
+      ) : inventoryItems.length === 0 ? (
         <View style={styles.emptyInventory}>
           <Text style={styles.emptyInventoryText}>
             No inventory items yet. Tap "ADD ITEM" to add one!
           </Text>
         </View>
       ) : (
-        inventoryItems.map((item) => (
-          <View key={item.id} style={styles.itemCard}>
-            <View style={styles.itemHeader}>
-              <Image source={item.icon} style={styles.icon} />
-              <Text style={styles.itemName}>{item.name}</Text>
-            </View>
-            <ProgressBar
-              progress={item.progress}
-              color={getProgressColor(item.status)}
-              style={styles.progressBar}
-            />
-            <View style={styles.infoRow}>
-              <Text style={styles.timeLeft}>{item.timeRemaining}</Text>
-              <View
-                style={[
-                  styles.statusTag,
-                  {
-                    backgroundColor:
-                      item.status === "Fresh" ? "#4CAF50" : "#FF9800",
-                  },
-                ]}
-              >
-                <Text style={styles.statusText}>{item.status}</Text>
+        itemsWithDisplayData.map((item) => {
+          return (
+            <View key={item.id} style={styles.itemCard}>
+              <View style={styles.itemHeader}>
+                <Image source={getIconSource(item.icon)} style={styles.icon} />
+                <Text style={styles.itemName}>{item.name}</Text>
               </View>
+              <ProgressBar
+                progress={item.displayProgress}
+                color={getProgressColor(item.displayStatus)}
+                style={styles.progressBar}
+              />
+              <View style={styles.infoRow}>
+                <Text style={styles.timeLeft}>{item.displayTimeRemaining}</Text>
+                <View
+                  style={[
+                    styles.statusTag,
+                    {
+                      backgroundColor:
+                        item.displayStatus === "Fresh" ? "#4CAF50" : "#FF9800",
+                    },
+                  ]}
+                >
+                  <Text style={styles.statusText}>{item.displayStatus}</Text>
+                </View>
               <TouchableOpacity
-                style={styles.smallButton}
-                onPress={() => incrementCount(item.id)}
+                style={[styles.smallButton, updatingItems.has(item.id) && styles.smallButtonDisabled]}
+                onPress={async () => {
+                  setUpdatingItems((prev) => new Set(prev).add(item.id));
+                  try {
+                    await incrementCount(item.id);
+                  } catch (error) {
+                    console.error('Error incrementing count:', error);
+                  } finally {
+                    setUpdatingItems((prev) => {
+                      const next = new Set(prev);
+                      next.delete(item.id);
+                      return next;
+                    });
+                  }
+                }}
+                disabled={updatingItems.has(item.id)}
               >
-                <Text style={styles.smallButtonText}>+</Text>
+                {updatingItems.has(item.id) ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.smallButtonText}>+</Text>
+                )}
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.smallButton}
-                onPress={() => decrementCount(item.id)}
+                style={[styles.smallButton, updatingItems.has(item.id) && styles.smallButtonDisabled]}
+                onPress={async () => {
+                  setUpdatingItems((prev) => new Set(prev).add(item.id));
+                  try {
+                    await decrementCount(item.id);
+                  } catch (error) {
+                    console.error('Error decrementing count:', error);
+                  } finally {
+                    setUpdatingItems((prev) => {
+                      const next = new Set(prev);
+                      next.delete(item.id);
+                      return next;
+                    });
+                  }
+                }}
+                disabled={updatingItems.has(item.id)}
               >
-                <Text style={styles.smallButtonText}>-</Text>
+                {updatingItems.has(item.id) ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.smallButtonText}>-</Text>
+                )}
               </TouchableOpacity>
               <Text style={styles.countText}>{item.count}</Text>
             </View>
           </View>
-        ))
+          );
+        })
       )}
 
       {/* Demand Section */}
@@ -166,6 +217,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 30,
     marginBottom: 10,
+  },
+  headerTop: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "flex-start",
+    marginBottom: 10,
+  },
+  backButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: "#E8F5E9",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#4CAF50",
+  },
+  backButtonText: {
+    color: "#2D5016",
+    fontWeight: "600",
+    fontSize: 14,
   },
   title: {
     fontSize: 28,
@@ -307,6 +377,9 @@ const styles = StyleSheet.create({
     color: "#2D5016",
     minWidth: 30,
     textAlign: "center",
+  },
+  smallButtonDisabled: {
+    opacity: 0.6,
   },
   emptyInventory: {
     backgroundColor: "#FFFFFF",
