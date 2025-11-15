@@ -28,6 +28,9 @@ export interface InventoryItem {
   userId: string;
   freshnessClassification?: 'Fresh' | 'Stale' | 'Expired';
   freshnessLoading?: boolean;
+  timeInFridge: number; // in hours
+  temperature?: number; // in °C
+  humidity?: number;
 }
 
 export const getIconSource = (iconKey: string): any => {
@@ -126,6 +129,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
           createdAt,
           expiresAt,
           userId: item.user_id,
+          timeInFridge: item.time_in_fridge || 0,
         };
       });
 

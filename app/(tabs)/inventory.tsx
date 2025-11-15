@@ -12,13 +12,14 @@ export default function InventoryScreen() {
     loading,
     incrementCount,
     decrementCount,
+    removeInventoryItem,
     refreshFreshnessPredictions,
   } = useInventory();
   const [updatingItems, setUpdatingItems] = useState<Set<string>>(new Set());
   const [freshnessLoading, setFreshnessLoading] = useState(false);
 
   // Get configuration from environment variables or Constants
-  const city = Constants.expoConfig?.extra?.weatherCity || process.env.EXPO_PUBLIC_WEATHER_CITY || 'Bacoor';
+  const city = Constants.expoConfig?.extra?.weatherCity || process.env.EXPO_PUBLIC_WEATHER_CITY || 'Dasmarinas';
   const weatherApiKey = Constants.expoConfig?.extra?.weatherApiKey || process.env.EXPO_PUBLIC_WEATHER_API_KEY || '';
 
   // Fetch freshness predictions when inventory items are loaded
@@ -46,6 +47,22 @@ export default function InventoryScreen() {
     return (expires - now) / (expires - created);
   }, []);
 
+  const getEstimatedRemaining = useCallback(
+    (freshness?: 'Fresh' | 'Stale' | 'Expired') => {
+      if (!freshness) return 'Unknown';
+      switch (freshness) {
+        case 'Fresh':
+          return '≈ 2 days';
+        case 'Stale':
+          return '≈ 1 day';
+        case 'Expired':
+          return 'Expired';
+        default:
+          return 'Unknown';
+      }
+    },
+    []
+  );
   const calculateTimeRemaining = useCallback((expiresAt: Date): string => {
     const now = Date.now();
     const diff = expiresAt.getTime() - now;
@@ -79,22 +96,61 @@ export default function InventoryScreen() {
         return '#9E9E9E';
     }
   }, []);
-
+  const estimateTimeFromFreshness = (
+    freshness: 'Fresh' | 'Stale' | 'Expired',
+    timeInFridge: number, // in hours
+    temp: number,
+    humidity: number
+  ): string => {
+    let remainingHours = 0;
+  
+    if (freshness === 'Expired') {
+      remainingHours = 0;
+    } else if (freshness === 'Stale') {
+      // Time left until Expired (72 hours max)
+      remainingHours = 72 - timeInFridge;
+    } else if (freshness === 'Fresh') {
+      // Time left until Stale threshold
+      if (temp > 10 || humidity > 80) {
+        remainingHours = 24 - timeInFridge;
+      } else {
+        remainingHours = 48 - timeInFridge;
+      }
+    }
+  
+    if (remainingHours <= 0) return 'Expired';
+  
+    const days = Math.floor(remainingHours / 24);
+    const hours = Math.round(remainingHours % 24);
+  
+    if (days > 0) return `${days}d ${hours}hrs`;
+    return `${hours}hrs`;
+  };
   // Calculate display values for all items once and memoize them
   // This ensures values are only calculated when inventoryItems change, not on every render
   const itemsWithDisplayData = useMemo(() => {
     return inventoryItems.map((item) => {
       const progress = calculateProgress(item.createdAt, item.expiresAt);
-      const timeRemaining = calculateTimeRemaining(item.expiresAt);
       const status = getStatus(progress);
+  
+      // Use ML freshness to estimate time
+      const displayTimeRemaining = item.freshnessClassification
+        ? estimateTimeFromFreshness(
+            item.freshnessClassification,
+            item.timeInFridge,         // make sure this exists in your item
+            item.temperature || 5,     // default fridge temp if undefined
+            item.humidity || 50        // default fridge humidity if undefined
+          )
+        : '...';
+  
       return {
         ...item,
         displayProgress: progress,
-        displayTimeRemaining: timeRemaining,
+        displayTimeRemaining,
         displayStatus: status,
       };
     });
-  }, [inventoryItems, calculateProgress, calculateTimeRemaining, getStatus]);
+  }, [inventoryItems, calculateProgress, getStatus]);
 
   return (
     <ScrollView style={styles.container}>
@@ -121,13 +177,19 @@ export default function InventoryScreen() {
           style={styles.button}
           onPress={() => router.push('/add-inventory-item')}
         >
-          <Text style={styles.buttonText}>ADD ITEM</Text>
+          <Text style={styles.buttonText}>ADD ITEM MANUALLY</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.button}
           onPress={() => router.push('/camera')}
         >
-          <Text style={styles.buttonText}>UPDATE INVENTORY</Text>
+          <Text style={styles.buttonText}>USE COMPUTER VISION</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => router.push('/inventoryStats')}
+        >
+          <Text style={styles.buttonText}>INVENTORY SATISTICS</Text>
         </TouchableOpacity>
       </View>
 
@@ -154,40 +216,38 @@ export default function InventoryScreen() {
                 <Text style={styles.itemName}>{item.name}</Text>
               </View>
               <ProgressBar
-                progress={item.displayProgress}
-                color={getProgressColor(item.displayStatus)}
+                progress={
+                  item.freshnessClassification === "Fresh"
+                    ? 1
+                    : item.freshnessClassification === "Stale"
+                    ? 0.5
+                    : 0
+                }
+                color={getFreshnessColor(item.freshnessClassification)}
                 style={styles.progressBar}
               />
               <View style={styles.infoRow}>
-                <Text style={styles.timeLeft}>{item.displayTimeRemaining}</Text>
-                <View
-                  style={[
-                    styles.statusTag,
-                    {
-                      backgroundColor:
-                        item.displayStatus === "Fresh" ? "#4CAF50" : "#FF9800",
-                    },
-                  ]}
-                >
-                  <Text style={styles.statusText}>{item.displayStatus}</Text>
-                </View>
-                {/* ML Freshness Classification */}
-                {item.freshnessLoading ? (
-                  <ActivityIndicator size="small" color="#666" style={styles.freshnessLoader} />
-                ) : item.freshnessClassification ? (
-                  <View
-                    style={[
-                      styles.statusTag,
-                      styles.freshnessTag,
-                      {
-                        backgroundColor: getFreshnessColor(item.freshnessClassification),
-                      },
-                    ]}
-                  >
-                    <Text style={styles.statusText}>{item.freshnessClassification}</Text>
-                  </View>
-                ) : null}
-              </View>
+  {/* Estimated Remaining Time */}
+  <Text style={styles.timeLeft}>
+    Est. Remaining: {getEstimatedRemaining(item.freshnessClassification)}
+  </Text>
+
+  {/* ML Freshness Classification */}
+  {item.freshnessLoading ? (
+    <ActivityIndicator size="small" color="#666" style={styles.freshnessLoader} />
+  ) : item.freshnessClassification ? (
+    <View
+      style={[
+        styles.statusTag,
+        styles.freshnessTag,
+        { backgroundColor: getFreshnessColor(item.freshnessClassification) },
+      ]}
+    >
+      <Text style={styles.statusText}>{item.freshnessClassification}</Text>
+    </View>
+  ) : null}
+</View>
+
               <View style={styles.infoRow}>
                 <TouchableOpacity
                   style={[styles.smallButton, updatingItems.has(item.id) && styles.smallButtonDisabled]}
@@ -239,6 +299,33 @@ export default function InventoryScreen() {
                 </TouchableOpacity>
                 <Text style={styles.countText}>{item.count}</Text>
               </View>
+
+              {/* Remove button positioned bottom-right under freshness tag */}
+              <TouchableOpacity
+                style={[styles.removeButton, updatingItems.has(item.id) && styles.smallButtonDisabled]}
+                onPress={async () => {
+                  // Use same updatingItems set to show loading state
+                  setUpdatingItems((prev) => new Set(prev).add(item.id));
+                  try {
+                    await removeInventoryItem(item.id);
+                  } catch (error) {
+                    console.error('Error removing item:', error);
+                  } finally {
+                    setUpdatingItems((prev) => {
+                      const next = new Set(prev);
+                      next.delete(item.id);
+                      return next;
+                    });
+                  }
+                }}
+                disabled={updatingItems.has(item.id)}
+              >
+                {updatingItems.has(item.id) ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.removeButtonText}>Remove</Text>
+                )}
+              </TouchableOpacity>
             </View>
           );
         })
@@ -253,20 +340,7 @@ export default function InventoryScreen() {
         </View>
       )}
 
-      {/* Demand Section */}
-      <View style={styles.demandSection}>
-        <Image
-          source={require("../../assets/burger.png")}
-          style={styles.largeIcon}
-        />
-        <Text style={styles.demandText}>
-          You haven't set your demand yet!
-        </Text>
-        <TouchableOpacity style={styles.demandButton}>
-          <Text style={styles.demandButtonText}>SET NOW!</Text>
-        </TouchableOpacity>
-        <Text style={styles.financesText}>FINANCES - Cooking Soon</Text>
-      </View>
+      
     </ScrollView>
   );
 }
@@ -364,6 +438,7 @@ const styles = StyleSheet.create({
     elevation: 3,
     borderLeftWidth: 4,
     borderLeftColor: "#4CAF50",
+    position: 'relative',
   },
   itemHeader: {
     flexDirection: "row",
@@ -371,9 +446,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   icon: {
-    width: 40,
-    height: 40,
+    width: 50,
+    height: 50,
     marginRight: 12,
+    resizeMode: 'contain',
   },
   itemName: {
     fontWeight: "bold",
@@ -438,7 +514,7 @@ const styles = StyleSheet.create({
   },
   smallButton: {
     backgroundColor: "#66BB6A",
-    paddingHorizontal: 10,
+    paddingHorizontal: 25,
     paddingVertical: 6,
     borderRadius: 12,
     minWidth: 36,
@@ -452,12 +528,12 @@ const styles = StyleSheet.create({
   smallButtonText: {
     color: "#FFFFFF",
     fontWeight: "bold",
-    fontSize: 16,
+    fontSize: 20,
   },
   countText: {
     fontWeight: "bold",
     marginLeft: 8,
-    fontSize: 15,
+    fontSize: 20,
     color: "#2D5016",
     minWidth: 30,
     textAlign: "center",
@@ -530,5 +606,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#999",
     fontStyle: "italic",
+  },
+  removeButton: {
+    position: 'absolute',
+    right: 12,
+    bottom: 12,
+    backgroundColor: '#F44336',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    shadowColor: '#F44336',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  removeButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 12,
   },
 });

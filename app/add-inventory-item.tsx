@@ -1,3 +1,4 @@
+import { Picker } from '@react-native-picker/picker';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -13,6 +14,17 @@ const availableIcons: { [key: string]: any } = {
   onion: require('../assets/onion.png'),
   burger: require('../assets/burger.png'),
   drink: require('../assets/drink.png'),
+};
+
+const nameToIconMap: { [key: string]: string } = {
+  "BURGER BUN": "burgerbun",
+  "BEEF": "beef",
+  "LETTUCE": "lettuce",
+  "CHEESE": "cheese",
+  "TOMATO": "tomato",
+  "ONION": "onion",
+  "BURGER": "burger",
+  "DRINK": "drink",
 };
 
 export default function AddInventoryItemScreen() {
@@ -69,15 +81,33 @@ export default function AddInventoryItemScreen() {
 
       {/* Item Name Input */}
       <View style={styles.section}>
-        <Text style={styles.label}>Item Name</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Enter item name (e.g., BURGER BUN)"
-          value={itemName}
-          onChangeText={setItemName}
-          autoCapitalize="characters"
-        />
-      </View>
+  <Text style={styles.label}>Item Name</Text>
+
+  <View style={styles.pickerWrapper}>
+  <Picker
+  selectedValue={itemName}
+  onValueChange={(value) => {
+    setItemName(value);
+
+    if (value && nameToIconMap[value]) {
+      setIconKey(nameToIconMap[value]);
+    }
+  }}
+>
+  <Picker.Item label="Select an item..." value="" />
+
+  <Picker.Item label="BURGER BUN" value="BURGER BUN" />
+  <Picker.Item label="BEEF" value="BEEF" />
+  <Picker.Item label="LETTUCE" value="LETTUCE" />
+  <Picker.Item label="CHEESE" value="CHEESE" />
+  <Picker.Item label="TOMATO" value="TOMATO" />
+  <Picker.Item label="ONION" value="ONION" />
+  <Picker.Item label="BURGER" value="BURGER" />
+  <Picker.Item label="DRINK" value="DRINK" />
+</Picker>
+
+  </View>
+</View>
 
       {/* Count Input */}
       <View style={styles.section}>
@@ -103,24 +133,7 @@ export default function AddInventoryItemScreen() {
         />
       </View>
 
-      {/* Icon Selection */}
-      <View style={styles.section}>
-        <Text style={styles.label}>Icon</Text>
-        <View style={styles.iconGrid}>
-          {Object.keys(availableIcons).map((key) => (
-            <TouchableOpacity
-              key={key}
-              style={[
-                styles.iconOption,
-                iconKey.toLowerCase() === key.toLowerCase() && styles.iconOptionSelected,
-              ]}
-              onPress={() => setIconKey(key)}
-            >
-              <Text style={styles.iconOptionText}>{key.toUpperCase()}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
+      
 
       {/* Confirm Button */}
       <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
@@ -175,31 +188,6 @@ const styles = StyleSheet.create({
     borderColor: '#E0E0E0',
     marginBottom: 12,
   },
-  iconGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
-  },
-  iconOption: {
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
-    minWidth: 100,
-    alignItems: 'center',
-  },
-  iconOptionSelected: {
-    borderColor: '#4CAF50',
-    backgroundColor: '#E8F5E9',
-  },
-  iconOptionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#333',
-  },
   confirmButton: {
     backgroundColor: '#4CAF50',
     paddingVertical: 16,
@@ -227,5 +215,12 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     color: '#666',
     fontSize: 14,
+  },
+  pickerWrapper: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    marginBottom: 12,
   },
 });
