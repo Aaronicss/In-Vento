@@ -1,5 +1,9 @@
 {
   "expo": {
+    "extra": {
+      "weatherCity": "${WEATHER_CITY}",
+      "weatherApiKey": "${WEATHER_API_KEY}"
+    },
     "name": "in-vento",
     "slug": "in-vento",
     "version": "1.0.0",

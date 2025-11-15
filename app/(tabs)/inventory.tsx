@@ -1,8 +1,9 @@
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ProgressBar } from "react-native-paper";
-import { useInventory, getIconSource } from "../../contexts/InventoryContext";
+import { getIconSource, useInventory } from "../../contexts/InventoryContext";
 
 export default function InventoryScreen() {
   const router = useRouter();
@@ -11,8 +12,29 @@ export default function InventoryScreen() {
     loading,
     incrementCount,
     decrementCount,
+    refreshFreshnessPredictions,
   } = useInventory();
   const [updatingItems, setUpdatingItems] = useState<Set<string>>(new Set());
+  const [freshnessLoading, setFreshnessLoading] = useState(false);
+
+  // Get configuration from environment variables or Constants
+  const city = Constants.expoConfig?.extra?.weatherCity || process.env.EXPO_PUBLIC_WEATHER_CITY || 'Bacoor';
+  const weatherApiKey = Constants.expoConfig?.extra?.weatherApiKey || process.env.EXPO_PUBLIC_WEATHER_API_KEY || '';
+
+  // Fetch freshness predictions when inventory items are loaded
+  useEffect(() => {
+    if (!loading && inventoryItems.length > 0 && weatherApiKey) {
+      setFreshnessLoading(true);
+      refreshFreshnessPredictions()
+        .catch((error) => {
+          console.error('Error refreshing freshness predictions:', error);
+        })
+        .finally(() => {
+          setFreshnessLoading(false);
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, inventoryItems.length, city, weatherApiKey]);
 
   // Helper functions to calculate progress, time remaining, and status
   const calculateProgress = useCallback((createdAt: Date, expiresAt: Date): number => {
@@ -41,6 +63,21 @@ export default function InventoryScreen() {
   // Helper function to get progress bar color based on status
   const getProgressColor = useCallback((status: 'Fresh' | 'Warning') => {
     return status === 'Fresh' ? '#4CAF50' : '#FF9800';
+  }, []);
+
+  // Helper function to get freshness classification color
+  const getFreshnessColor = useCallback((classification?: 'Fresh' | 'Stale' | 'Expired') => {
+    if (!classification) return '#9E9E9E'; // Gray for unknown
+    switch (classification) {
+      case 'Fresh':
+        return '#4CAF50'; // Green
+      case 'Stale':
+        return '#FF9800'; // Orange
+      case 'Expired':
+        return '#F44336'; // Red
+      default:
+        return '#9E9E9E';
+    }
   }, []);
 
   // Calculate display values for all items once and memoize them
@@ -134,59 +171,86 @@ export default function InventoryScreen() {
                 >
                   <Text style={styles.statusText}>{item.displayStatus}</Text>
                 </View>
-              <TouchableOpacity
-                style={[styles.smallButton, updatingItems.has(item.id) && styles.smallButtonDisabled]}
-                onPress={async () => {
-                  setUpdatingItems((prev) => new Set(prev).add(item.id));
-                  try {
-                    await incrementCount(item.id);
-                  } catch (error) {
-                    console.error('Error incrementing count:', error);
-                  } finally {
-                    setUpdatingItems((prev) => {
-                      const next = new Set(prev);
-                      next.delete(item.id);
-                      return next;
-                    });
-                  }
-                }}
-                disabled={updatingItems.has(item.id)}
-              >
-                {updatingItems.has(item.id) ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.smallButtonText}>+</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.smallButton, updatingItems.has(item.id) && styles.smallButtonDisabled]}
-                onPress={async () => {
-                  setUpdatingItems((prev) => new Set(prev).add(item.id));
-                  try {
-                    await decrementCount(item.id);
-                  } catch (error) {
-                    console.error('Error decrementing count:', error);
-                  } finally {
-                    setUpdatingItems((prev) => {
-                      const next = new Set(prev);
-                      next.delete(item.id);
-                      return next;
-                    });
-                  }
-                }}
-                disabled={updatingItems.has(item.id)}
-              >
-                {updatingItems.has(item.id) ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.smallButtonText}>-</Text>
-                )}
-              </TouchableOpacity>
-              <Text style={styles.countText}>{item.count}</Text>
+                {/* ML Freshness Classification */}
+                {item.freshnessLoading ? (
+                  <ActivityIndicator size="small" color="#666" style={styles.freshnessLoader} />
+                ) : item.freshnessClassification ? (
+                  <View
+                    style={[
+                      styles.statusTag,
+                      styles.freshnessTag,
+                      {
+                        backgroundColor: getFreshnessColor(item.freshnessClassification),
+                      },
+                    ]}
+                  >
+                    <Text style={styles.statusText}>{item.freshnessClassification}</Text>
+                  </View>
+                ) : null}
+              </View>
+              <View style={styles.infoRow}>
+                <TouchableOpacity
+                  style={[styles.smallButton, updatingItems.has(item.id) && styles.smallButtonDisabled]}
+                  onPress={async () => {
+                    setUpdatingItems((prev) => new Set(prev).add(item.id));
+                    try {
+                      await incrementCount(item.id);
+                    } catch (error) {
+                      console.error('Error incrementing count:', error);
+                    } finally {
+                      setUpdatingItems((prev) => {
+                        const next = new Set(prev);
+                        next.delete(item.id);
+                        return next;
+                      });
+                    }
+                  }}
+                  disabled={updatingItems.has(item.id)}
+                >
+                  {updatingItems.has(item.id) ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.smallButtonText}>+</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.smallButton, updatingItems.has(item.id) && styles.smallButtonDisabled]}
+                  onPress={async () => {
+                    setUpdatingItems((prev) => new Set(prev).add(item.id));
+                    try {
+                      await decrementCount(item.id);
+                    } catch (error) {
+                      console.error('Error decrementing count:', error);
+                    } finally {
+                      setUpdatingItems((prev) => {
+                        const next = new Set(prev);
+                        next.delete(item.id);
+                        return next;
+                      });
+                    }
+                  }}
+                  disabled={updatingItems.has(item.id)}
+                >
+                  {updatingItems.has(item.id) ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.smallButtonText}>-</Text>
+                  )}
+                </TouchableOpacity>
+                <Text style={styles.countText}>{item.count}</Text>
+              </View>
             </View>
-          </View>
           );
         })
+      )}
+
+      {/* Freshness Prediction Info */}
+      {!loading && inventoryItems.length > 0 && !weatherApiKey && (
+        <View style={styles.infoCard}>
+          <Text style={styles.infoText}>
+            ⚠️ WeatherAPI key not configured. Freshness predictions are disabled.
+          </Text>
+        </View>
       )}
 
       {/* Demand Section */}
@@ -351,6 +415,26 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     letterSpacing: 0.2,
+  },
+  freshnessTag: {
+    marginLeft: 4,
+  },
+  freshnessLoader: {
+    marginLeft: 8,
+  },
+  infoCard: {
+    backgroundColor: "#FFF3CD",
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 8,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: "#FFC107",
+  },
+  infoText: {
+    fontSize: 12,
+    color: "#856404",
+    lineHeight: 18,
   },
   smallButton: {
     backgroundColor: "#66BB6A",

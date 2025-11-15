@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
+import { getBatchFreshnessPredictions } from '../services/freshnessService';
 
 // Icon mapping for converting string keys to image sources
 export const iconMap: { [key: string]: any } = {
@@ -24,6 +25,8 @@ export interface InventoryItem {
   createdAt: Date;
   expiresAt: Date;
   userId: string;
+  freshnessClassification?: 'Fresh' | 'Stale' | 'Expired'; // ML-based freshness prediction
+  freshnessLoading?: boolean; // Loading state for freshness prediction
 }
 
 // Helper to get icon source from icon key
@@ -45,6 +48,7 @@ interface InventoryContextType {
   incrementCount: (itemId: string) => Promise<void>;
   decrementCount: (itemId: string) => Promise<void>;
   refreshInventory: () => Promise<void>;
+  refreshFreshnessPredictions: (city: string, weatherApiKey: string) => Promise<void>;
 }
 
 const InventoryContext = createContext<InventoryContextType | undefined>(undefined);
@@ -261,6 +265,66 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Refresh freshness predictions for all inventory items
+  const refreshFreshnessPredictions = async (city: string, weatherApiKey: string) => {
+    try {
+      // Capture current items at the start
+      const currentItems = [...inventoryItems];
+      
+      if (currentItems.length === 0) {
+        return;
+      }
+
+      // Set loading state for all items
+      setInventoryItems((prevItems) =>
+        prevItems.map((item) => ({
+          ...item,
+          freshnessLoading: true,
+        }))
+      );
+
+      // Prepare inputs for batch prediction
+      const inputs = currentItems.map((item) => ({
+        ingredientType: item.name,
+        addedAt: item.createdAt,
+        city,
+        weatherApiKey,
+      }));
+
+      // Get batch predictions
+      const predictions = await getBatchFreshnessPredictions(inputs);
+
+      // Update items with freshness classifications
+      // Match predictions to items by ID to handle potential reordering
+      setInventoryItems((prevItems) => {
+        // Create a map of item IDs to their original indices
+        const itemIdMap = new Map(currentItems.map((item, idx) => [item.id, idx]));
+        
+        return prevItems.map((item) => {
+          const originalIndex = itemIdMap.get(item.id);
+          const classification = originalIndex !== undefined && originalIndex < predictions.length
+            ? predictions[originalIndex]?.classification
+            : undefined;
+          
+          return {
+            ...item,
+            freshnessClassification: classification,
+            freshnessLoading: false,
+          };
+        });
+      });
+    } catch (error) {
+      console.error('Error refreshing freshness predictions:', error);
+      // Clear loading state on error
+      setInventoryItems((prevItems) =>
+        prevItems.map((item) => ({
+          ...item,
+          freshnessLoading: false,
+        }))
+      );
+    }
+  };
+
   return (
     <InventoryContext.Provider
       value={{
@@ -272,6 +336,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         incrementCount,
         decrementCount,
         refreshInventory: fetchInventoryItems,
+        refreshFreshnessPredictions,
       }}
     >
       {children}
