@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import Constants from 'expo-constants';
+import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { getBatchFreshnessPredictions } from '../services/freshnessService';
 
-// Icon mapping for converting string keys to image sources
+// Icon mapping
 export const iconMap: { [key: string]: any } = {
   burgerbun: require('../assets/burgerbun.png'),
   beef: require('../assets/beef.png'),
@@ -17,19 +18,18 @@ export const iconMap: { [key: string]: any } = {
 export interface InventoryItem {
   id: string;
   name: string;
-  icon: string; // Icon key (e.g., "burger", "cheese")
+  icon: string;
   count: number;
-  progress: number; // 0.0 to 1.0 representing freshness/shelf life
-  timeRemaining: string; // e.g., "1d 2hrs"
-  status: 'Fresh' | 'Warning'; // Status based on progress
+  progress: number;
+  timeRemaining: string;
+  status: 'Fresh' | 'Warning';
   createdAt: Date;
   expiresAt: Date;
   userId: string;
-  freshnessClassification?: 'Fresh' | 'Stale' | 'Expired'; // ML-based freshness prediction
-  freshnessLoading?: boolean; // Loading state for freshness prediction
+  freshnessClassification?: 'Fresh' | 'Stale' | 'Expired';
+  freshnessLoading?: boolean;
 }
 
-// Helper to get icon source from icon key
 export const getIconSource = (iconKey: string): any => {
   return iconMap[iconKey.toLowerCase()] || iconMap.burger;
 };
@@ -37,23 +37,18 @@ export const getIconSource = (iconKey: string): any => {
 interface InventoryContextType {
   inventoryItems: InventoryItem[];
   loading: boolean;
-  addInventoryItem: (
-    name: string,
-    icon: string,
-    count: number,
-    shelfLifeDays: number
-  ) => Promise<void>;
+  addInventoryItem: (name: string, icon: string, count: number, shelfLifeDays: number) => Promise<void>;
   updateInventoryItem: (itemId: string, updates: Partial<InventoryItem>) => Promise<void>;
   removeInventoryItem: (itemId: string) => Promise<void>;
   incrementCount: (itemId: string) => Promise<void>;
   decrementCount: (itemId: string) => Promise<void>;
   refreshInventory: () => Promise<void>;
-  refreshFreshnessPredictions: (city: string, weatherApiKey: string) => Promise<void>;
+  refreshFreshnessPredictions: () => Promise<void>;
 }
 
 const InventoryContext = createContext<InventoryContextType | undefined>(undefined);
 
-// Helper to calculate time remaining string
+// Helpers
 const calculateTimeRemaining = (expiresAt: Date): string => {
   const now = new Date();
   const diff = expiresAt.getTime() - now.getTime();
@@ -66,7 +61,6 @@ const calculateTimeRemaining = (expiresAt: Date): string => {
   return `${hours}hrs`;
 };
 
-// Helper to calculate progress based on expiration
 const calculateProgress = (createdAt: Date, expiresAt: Date): number => {
   const now = new Date().getTime();
   const created = createdAt.getTime();
@@ -78,7 +72,6 @@ const calculateProgress = (createdAt: Date, expiresAt: Date): number => {
   return (expires - now) / (expires - created);
 };
 
-// Helper to get status based on progress
 const getStatus = (progress: number): 'Fresh' | 'Warning' => {
   return progress > 0.5 ? 'Fresh' : 'Warning';
 };
@@ -87,12 +80,16 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Fetch inventory items from Supabase
+  // ✅ TypeScript-safe loading of Expo Constants
+  const extra = Constants.expoConfig?.extra as { weatherCity: string; weatherApiKey: string } | undefined;
+  const weatherCity = extra?.weatherCity ?? '';
+  const weatherApiKey = extra?.weatherApiKey ?? '';
+
+  // Fetch inventory items
   const fetchInventoryItems = async () => {
     try {
       setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
-      
       if (!user) {
         setInventoryItems([]);
         setLoading(false);
@@ -111,7 +108,6 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Convert Supabase data to InventoryItem format
       const items: InventoryItem[] = (data || []).map((item) => {
         const createdAt = new Date(item.created_at);
         const expiresAt = new Date(item.expires_at);
@@ -141,61 +137,36 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Load inventory items on mount and when auth state changes
   useEffect(() => {
     fetchInventoryItems();
 
-    // Subscribe to auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
       fetchInventoryItems();
     });
 
-    return () => {
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   }, []);
 
-  // Note: Progress, time remaining, and status are calculated on-demand in the UI
-  // to avoid constant updates that make items hard to read
-
-  const addInventoryItem = async (
-    name: string,
-    icon: string,
-    count: number,
-    shelfLifeDays: number
-  ) => {
+  // CRUD functions
+  const addInventoryItem = async (name: string, icon: string, count: number, shelfLifeDays: number) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        throw new Error('User not authenticated');
-      }
+      if (!user) throw new Error('User not authenticated');
 
       const createdAt = new Date();
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + shelfLifeDays);
 
-      const { data, error } = await supabase
-        .from('inventory_items')
-        .insert([
-          {
-            user_id: user.id,
-            name,
-            icon,
-            count,
-            created_at: createdAt.toISOString(),
-            expires_at: expiresAt.toISOString(),
-          },
-        ])
-        .select()
-        .single();
+      const { error } = await supabase.from('inventory_items').insert([{
+        user_id: user.id,
+        name,
+        icon,
+        count,
+        created_at: createdAt.toISOString(),
+        expires_at: expiresAt.toISOString(),
+      }]);
 
-      if (error) {
-        console.error('Error adding inventory item:', error);
-        throw error;
-      }
-
-      // Refresh inventory items
+      if (error) throw error;
       await fetchInventoryItems();
     } catch (error) {
       console.error('Error in addInventoryItem:', error);
@@ -206,24 +177,14 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   const updateInventoryItem = async (itemId: string, updates: Partial<InventoryItem>) => {
     try {
       const updateData: any = {};
-
       if (updates.name !== undefined) updateData.name = updates.name;
       if (updates.icon !== undefined) updateData.icon = updates.icon;
       if (updates.count !== undefined) updateData.count = updates.count;
       if (updates.expiresAt !== undefined) updateData.expires_at = updates.expiresAt.toISOString();
       if (updates.createdAt !== undefined) updateData.created_at = updates.createdAt.toISOString();
 
-      const { error } = await supabase
-        .from('inventory_items')
-        .update(updateData)
-        .eq('id', itemId);
-
-      if (error) {
-        console.error('Error updating inventory item:', error);
-        throw error;
-      }
-
-      // Refresh inventory items
+      const { error } = await supabase.from('inventory_items').update(updateData).eq('id', itemId);
+      if (error) throw error;
       await fetchInventoryItems();
     } catch (error) {
       console.error('Error in updateInventoryItem:', error);
@@ -233,17 +194,8 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
 
   const removeInventoryItem = async (itemId: string) => {
     try {
-      const { error } = await supabase
-        .from('inventory_items')
-        .delete()
-        .eq('id', itemId);
-
-      if (error) {
-        console.error('Error removing inventory item:', error);
-        throw error;
-      }
-
-      // Refresh inventory items
+      const { error } = await supabase.from('inventory_items').delete().eq('id', itemId);
+      if (error) throw error;
       await fetchInventoryItems();
     } catch (error) {
       console.error('Error in removeInventoryItem:', error);
@@ -252,76 +204,48 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   };
 
   const incrementCount = async (itemId: string) => {
-    const item = inventoryItems.find((i) => i.id === itemId);
-    if (item) {
-      await updateInventoryItem(itemId, { count: item.count + 1 });
-    }
+    const item = inventoryItems.find(i => i.id === itemId);
+    if (item) await updateInventoryItem(itemId, { count: item.count + 1 });
   };
 
   const decrementCount = async (itemId: string) => {
-    const item = inventoryItems.find((i) => i.id === itemId);
-    if (item) {
-      await updateInventoryItem(itemId, { count: Math.max(0, item.count - 1) });
-    }
+    const item = inventoryItems.find(i => i.id === itemId);
+    if (item) await updateInventoryItem(itemId, { count: Math.max(0, item.count - 1) });
   };
 
-  // Refresh freshness predictions for all inventory items
-  const refreshFreshnessPredictions = async (city: string, weatherApiKey: string) => {
+  // Refresh freshness predictions using Expo Constants
+  const refreshFreshnessPredictions = async () => {
     try {
-      // Capture current items at the start
       const currentItems = [...inventoryItems];
-      
-      if (currentItems.length === 0) {
-        return;
-      }
+      if (currentItems.length === 0) return;
 
-      // Set loading state for all items
-      setInventoryItems((prevItems) =>
-        prevItems.map((item) => ({
-          ...item,
-          freshnessLoading: true,
-        }))
-      );
+      setInventoryItems(prevItems => prevItems.map(item => ({ ...item, freshnessLoading: true })));
 
-      // Prepare inputs for batch prediction
-      const inputs = currentItems.map((item) => ({
+      const inputs = currentItems.map(item => ({
         ingredientType: item.name,
         addedAt: item.createdAt,
-        city,
-        weatherApiKey,
+        city: weatherCity,
+        weatherApiKey: weatherApiKey,
       }));
 
-      // Get batch predictions
       const predictions = await getBatchFreshnessPredictions(inputs);
 
-      // Update items with freshness classifications
-      // Match predictions to items by ID to handle potential reordering
-      setInventoryItems((prevItems) => {
-        // Create a map of item IDs to their original indices
-        const itemIdMap = new Map(currentItems.map((item, idx) => [item.id, idx]));
-        
-        return prevItems.map((item) => {
+      const itemIdMap = new Map(currentItems.map((item, idx) => [item.id, idx]));
+
+      setInventoryItems(prevItems =>
+        prevItems.map(item => {
           const originalIndex = itemIdMap.get(item.id);
-          const classification = originalIndex !== undefined && originalIndex < predictions.length
-            ? predictions[originalIndex]?.classification
-            : undefined;
-          
-          return {
-            ...item,
-            freshnessClassification: classification,
-            freshnessLoading: false,
-          };
-        });
-      });
+          const classification =
+            originalIndex !== undefined && originalIndex < predictions.length
+              ? predictions[originalIndex]?.classification
+              : undefined;
+
+          return { ...item, freshnessClassification: classification, freshnessLoading: false };
+        })
+      );
     } catch (error) {
       console.error('Error refreshing freshness predictions:', error);
-      // Clear loading state on error
-      setInventoryItems((prevItems) =>
-        prevItems.map((item) => ({
-          ...item,
-          freshnessLoading: false,
-        }))
-      );
+      setInventoryItems(prevItems => prevItems.map(item => ({ ...item, freshnessLoading: false })));
     }
   };
 
@@ -346,8 +270,6 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
 
 export function useInventory() {
   const context = useContext(InventoryContext);
-  if (context === undefined) {
-    throw new Error('useInventory must be used within an InventoryProvider');
-  }
+  if (!context) throw new Error('useInventory must be used within an InventoryProvider');
   return context;
 }
