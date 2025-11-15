@@ -42,27 +42,12 @@ export default function InventoryScreen() {
     const now = Date.now();
     const created = createdAt.getTime();
     const expires = expiresAt.getTime();
-    if (now >= expires) return 0;
-    if (now <= created) return 1;
-    return (expires - now) / (expires - created);
+    const total = expires - created;
+    if (total <= 0) return 0;
+    const remaining = Math.max(0, expires - now);
+    return Math.max(0, Math.min(1, remaining / total));
   }, []);
 
-  const getEstimatedRemaining = useCallback(
-    (freshness?: 'Fresh' | 'Stale' | 'Expired') => {
-      if (!freshness) return 'Unknown';
-      switch (freshness) {
-        case 'Fresh':
-          return '≈ 2 days';
-        case 'Stale':
-          return '≈ 1 day';
-        case 'Expired':
-          return 'Expired';
-        default:
-          return 'Unknown';
-      }
-    },
-    []
-  );
   const calculateTimeRemaining = useCallback((expiresAt: Date): string => {
     const now = Date.now();
     const diff = expiresAt.getTime() - now;
@@ -73,13 +58,18 @@ export default function InventoryScreen() {
     return `${hours}hrs`;
   }, []);
 
-  const getStatus = useCallback((progress: number): 'Fresh' | 'Warning' => {
-    return progress > 0.5 ? 'Fresh' : 'Warning';
-  }, []);
+  const getEstimatedRemaining = useCallback(
+    (expiresAt?: Date) => {
+      if (!expiresAt) return 'Unknown';
+      return calculateTimeRemaining(expiresAt);
+    },
+    [calculateTimeRemaining]
+  );
 
-  // Helper function to get progress bar color based on status
-  const getProgressColor = useCallback((status: 'Fresh' | 'Warning') => {
-    return status === 'Fresh' ? '#4CAF50' : '#FF9800';
+  const getStatus = useCallback((progress: number): 'Fresh' | 'Stale' | 'Expired' => {
+    if (progress <= 0) return 'Expired';
+    if (progress <= 0.5) return 'Stale';
+    return 'Fresh';
   }, []);
 
   // Helper function to get freshness classification color
@@ -132,17 +122,12 @@ export default function InventoryScreen() {
     return inventoryItems.map((item) => {
       const progress = calculateProgress(item.createdAt, item.expiresAt);
       const status = getStatus(progress);
-  
-      // Use ML freshness to estimate time
-      const displayTimeRemaining = item.freshnessClassification
-        ? estimateTimeFromFreshness(
-            item.freshnessClassification,
-            item.timeInFridge,         // make sure this exists in your item
-            item.temperature || 5,     // default fridge temp if undefined
-            item.humidity || 50        // default fridge humidity if undefined
-          )
-        : '...';
-  
+
+      // Use actual expiresAt - createdAt math to estimate remaining time
+      const displayTimeRemaining = item.expiresAt
+        ? calculateTimeRemaining(item.expiresAt)
+        : 'Unknown';
+
       return {
         ...item,
         displayProgress: progress,
@@ -150,7 +135,7 @@ export default function InventoryScreen() {
         displayStatus: status,
       };
     });
-  }, [inventoryItems, calculateProgress, getStatus]);
+  }, [inventoryItems, calculateProgress, getStatus, calculateTimeRemaining]);
 
   return (
     <ScrollView style={styles.container}>
@@ -216,36 +201,31 @@ export default function InventoryScreen() {
                 <Text style={styles.itemName}>{item.name}</Text>
               </View>
               <ProgressBar
-                progress={
-                  item.freshnessClassification === "Fresh"
-                    ? 1
-                    : item.freshnessClassification === "Stale"
-                    ? 0.5
-                    : 0
-                }
-                color={getFreshnessColor(item.freshnessClassification)}
+                progress={item.displayProgress}
+                color={getFreshnessColor(item.displayStatus)}
                 style={styles.progressBar}
               />
               <View style={styles.infoRow}>
-  {/* Estimated Remaining Time */}
+  {/* Estimated Remaining Time (computed from expiresAt) */}
   <Text style={styles.timeLeft}>
-    Est. Remaining: {getEstimatedRemaining(item.freshnessClassification)}
+    Est. Remaining: {item.displayTimeRemaining}
   </Text>
 
-  {/* ML Freshness Classification */}
+  {/* Computed Freshness Classification */}
   {item.freshnessLoading ? (
     <ActivityIndicator size="small" color="#666" style={styles.freshnessLoader} />
-  ) : item.freshnessClassification ? (
+  ) : (
     <View
       style={[
         styles.statusTag,
         styles.freshnessTag,
-        { backgroundColor: getFreshnessColor(item.freshnessClassification) },
+        { backgroundColor: getFreshnessColor(item.displayStatus) },
       ]}
     >
-      <Text style={styles.statusText}>{item.freshnessClassification}</Text>
+      <Text style={styles.statusText}>{item.displayStatus}</Text>
     </View>
-  ) : null}
+  )}
+
 </View>
 
               <View style={styles.infoRow}>
