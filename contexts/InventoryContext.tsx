@@ -40,7 +40,8 @@ export const getIconSource = (iconKey: string): any => {
 interface InventoryContextType {
   inventoryItems: InventoryItem[];
   loading: boolean;
-  addInventoryItem: (name: string, icon: string, count: number, shelfLifeDays: number) => Promise<void>;
+  // shelfLifeDays is optional if expiresAt is provided
+  addInventoryItem: (name: string, icon: string, count: number, shelfLifeDays?: number, expiresAt?: Date) => Promise<void>;
   updateInventoryItem: (itemId: string, updates: Partial<InventoryItem>) => Promise<void>;
   removeInventoryItem: (itemId: string) => Promise<void>;
   incrementCount: (itemId: string) => Promise<void>;
@@ -152,14 +153,16 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // CRUD functions
-  const addInventoryItem = async (name: string, icon: string, count: number, shelfLifeDays: number) => {
+  const addInventoryItem = async (name: string, icon: string, count: number, shelfLifeDays?: number, expiresAt?: Date) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not authenticated');
 
       const createdAt = new Date();
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + shelfLifeDays);
+      // If explicit expiresAt provided, use it; otherwise compute from shelfLifeDays (default 7 days)
+      const finalExpiresAt = expiresAt ? new Date(expiresAt) : new Date();
+      const daysToAdd = typeof shelfLifeDays === 'number' && !isNaN(shelfLifeDays) ? shelfLifeDays : 7;
+      if (!expiresAt) finalExpiresAt.setDate(finalExpiresAt.getDate() + daysToAdd);
 
       const { error } = await supabase.from('inventory_items').insert([{
         user_id: user.id,
@@ -167,7 +170,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         icon,
         count,
         created_at: createdAt.toISOString(),
-        expires_at: expiresAt.toISOString(),
+        expires_at: finalExpiresAt.toISOString(),
       }]);
 
       if (error) throw error;

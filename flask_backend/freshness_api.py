@@ -190,7 +190,6 @@ def predict():
                 "confidence": None,
                 "warning": "Model not loaded, using mock prediction"
             })
-            
     except ValueError as e:
         return jsonify({"error": f"Invalid input format: {str(e)}"}), 400
     except Exception as e:

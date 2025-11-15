@@ -1,8 +1,11 @@
 import { Picker } from '@react-native-picker/picker';
+import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useInventory } from '../contexts/InventoryContext';
+import { getShelfLifePrediction } from '../services/freshnessApi';
+import { fetchWeatherData } from '../services/weatherApi';
 
 // Available icons mapping
 const availableIcons: { [key: string]: any } = {
@@ -27,6 +30,16 @@ const nameToIconMap: { [key: string]: string } = {
   "DRINK": "drink",
 };
 
+// Small helper to format a Date into a readable date + time string
+const formatDateTime = (d: Date) => {
+  try {
+    return d.toLocaleString();
+  } catch (e) {
+    // Fallback: ISO string
+    return d.toISOString();
+  }
+};
+
 export default function AddInventoryItemScreen() {
   const router = useRouter();
   const { addInventoryItem } = useInventory();
@@ -35,6 +48,9 @@ export default function AddInventoryItemScreen() {
   const [count, setCount] = useState('1');
   const [shelfLifeDays, setShelfLifeDays] = useState('7');
   const [iconKey, setIconKey] = useState('burger');
+  const [predictedExpiryDate, setPredictedExpiryDate] = useState<Date | null>(null);
+  const [fetchingPrediction, setFetchingPrediction] = useState(false);
+  const lastRequestedRef = useRef<string | null>(null);
 
   const handleConfirm = async () => {
     // Validation
@@ -58,7 +74,14 @@ export default function AddInventoryItemScreen() {
     setLoading(true);
     try {
       // Add item to inventory (pass icon key as string)
-      await addInventoryItem(itemName.trim().toUpperCase(), iconKey.toLowerCase(), countNum, shelfLifeNum);
+      // If we have a predictedExpiryDate from the ML API, pass it so it's stored directly.
+      await addInventoryItem(
+        itemName.trim().toUpperCase(),
+        iconKey.toLowerCase(),
+        countNum,
+        shelfLifeNum,
+        predictedExpiryDate || undefined
+      );
       Alert.alert('Item Added', `${itemName} has been added to inventory!`, [
         {
           text: 'OK',
@@ -92,6 +115,61 @@ export default function AddInventoryItemScreen() {
     if (value && nameToIconMap[value]) {
       setIconKey(nameToIconMap[value]);
     }
+
+    // Fetch predicted shelf life from API (ML returns hours_until_expiry)
+    if (value) {
+      // record the item we requested prediction for — prevents race conditions
+      lastRequestedRef.current = value;
+      setFetchingPrediction(true);
+
+      // Try to read weather API key and city from Expo Constants or env
+      const extra = Constants.expoConfig?.extra as { weatherCity?: string; weatherApiKey?: string } | undefined;
+      const city = extra?.weatherCity || process.env.EXPO_PUBLIC_WEATHER_CITY || '';
+      const apiKey = extra?.weatherApiKey || process.env.EXPO_PUBLIC_WEATHER_API_KEY || '';
+
+      // Fetch weather if key and city are available; otherwise use defaults
+      const weatherPromise = apiKey && city ? fetchWeatherData(city, apiKey).catch(err => {
+        console.error('Weather fetch failed, using defaults:', err);
+        return { temperature: 5, humidity: 50 };
+      }) : Promise.resolve({ temperature: 5, humidity: 50 });
+
+      weatherPromise
+        .then(({ temperature, humidity }) => {
+          return getShelfLifePrediction(value, temperature, humidity, 0);
+        })
+        .then((predictedHours) => {
+          // ignore stale responses
+          if (lastRequestedRef.current !== value) return;
+          // Convert hours to days for display (round up)
+          const days = Math.max(1, Math.ceil(predictedHours / 24));
+          setShelfLifeDays(days.toString());
+
+          // Calculate expiry date by adding hours
+          const now = new Date();
+          const expiryDate = new Date(now.getTime() + predictedHours * 60 * 60 * 1000);
+          setPredictedExpiryDate(expiryDate);
+        })
+        .catch((error) => {
+          console.error('Error fetching shelf life:', error);
+          // Only apply fallback if this is the latest requested item
+          if (lastRequestedRef.current !== value) return;
+          // Fall back to 7 days if API call fails
+          setShelfLifeDays('7');
+          const now = new Date();
+          const expiryDate = new Date(now);
+          expiryDate.setDate(expiryDate.getDate() + 7);
+          setPredictedExpiryDate(expiryDate);
+        })
+        .finally(() => {
+          // clear request marker and fetching flag
+          if (lastRequestedRef.current === value) lastRequestedRef.current = null;
+          setFetchingPrediction(false);
+        });
+    } else {
+      lastRequestedRef.current = null;
+      setShelfLifeDays('7');
+      setPredictedExpiryDate(null);
+    }
   }}
 >
   <Picker.Item label="Select an item..." value="" />
@@ -104,9 +182,25 @@ export default function AddInventoryItemScreen() {
   <Picker.Item label="ONION" value="ONION" />
   <Picker.Item label="BURGER" value="BURGER" />
   <Picker.Item label="DRINK" value="DRINK" />
-</Picker>
+</Picker></View>
 
-  </View>
+  {/* Prediction UI: show loading while fetching, otherwise show the computed expiry */}
+  {itemName && fetchingPrediction && (
+    <View style={styles.predictionCard}>
+      <Text style={styles.predictionLabel}>Fetching Prediction...</Text>
+      <Text style={styles.predictionDate}>Loading...</Text>
+      <Text style={styles.predictionShelfLife}>Please wait</Text>
+    </View>
+  )}
+
+  {itemName && !fetchingPrediction && predictedExpiryDate && (
+    <View style={styles.predictionCard}>
+      <Text style={styles.predictionLabel}>Predicted Expiry</Text>
+      <Text style={styles.predictionDate}>{formatDateTime(predictedExpiryDate)}</Text>
+      <Text style={styles.predictionShelfLife}>Shelf life: {shelfLifeDays} day{Number(shelfLifeDays) === 1 ? '' : 's'}</Text>
+    </View>
+  )}
+
 </View>
 
       {/* Count Input */}
@@ -222,5 +316,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E0E0E0',
     marginBottom: 12,
+  },
+  predictionCard: {
+    backgroundColor: '#E8F5E9',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#4CAF50',
+  },
+  predictionLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2D5016',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+    marginBottom: 4,
+  },
+  predictionDate: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1A3D0F',
+    marginBottom: 4,
+  },
+  predictionShelfLife: {
+    fontSize: 13,
+    color: '#555',
+    fontWeight: '500',
   },
 });

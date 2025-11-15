@@ -6,12 +6,12 @@
  * 3. Calls Flask API for prediction
  */
 
-import { fetchWeatherData, WeatherData } from './weatherApi';
 import {
-  predictFreshness,
   calculateTimeInRefrigerator,
   FreshnessPredictionResponse,
+  predictFreshness,
 } from './freshnessApi';
+import { fetchWeatherData } from './weatherApi';
 
 export interface FreshnessPredictionInput {
   ingredientType: string;
