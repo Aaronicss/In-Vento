@@ -1,456 +1,298 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../../lib/supabase';
+import { Picker } from '@react-native-picker/picker';
+import Constants from 'expo-constants';
+import { Router, useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useInventory } from '../../contexts/InventoryContext';
+import { getShelfLifePrediction } from '../../services/freshnessApi';
+import { fetchWeatherData } from '../../services/weatherApi';
 
-interface DetectionResult {
-  id: string;
-  user_id: string;
-  image_url: string;
-  detected_items: any[];
-  primary_item: string;
-  mold_detected: boolean;
-  confidence_scores: number[];
-  created_at: string;
-}
+// Available icons mapping
+const availableIcons: { [key: string]: any } = {
+  burgerbun: require('../../assets/burgerbun.png'),
+  beef: require('../../assets/beef.png'),
+  lettuce: require('../../assets/lettuce.png'),
+  cheese: require('../../assets/cheese.png'),
+  tomato: require('../../assets/tomato.png'),
+  onion: require('../../assets/onion.png'),
+  burger: require('../../assets/burger.png'),
+  drink: require('../../assets/drink.png'),
+};
 
-export default function DetectionResultsScreen() {
-  const router = useRouter();
-  const params = useLocalSearchParams();
+const nameToIconMap: { [key: string]: string } = {
+  "BURGER BUN": "burgerbun",
+  "BEEF": "beef",
+  "LETTUCE": "lettuce",
+  "CHEESE": "cheese",
+  "TOMATO": "tomato",
+  "ONION": "onion",
+  "BURGER": "burger",
+  "DRINK": "drink",
+};
+
+// Format DateTime helper
+const formatDateTime = (d: Date) => {
+  try { return d.toLocaleString(); }
+  catch { return d.toISOString(); }
+};
+
+export default function AddInventoryItemScreen() {
+  const router: Router = useRouter();
+  const params = useLocalSearchParams(); // for camera result
+  const detectedItem = params.detectedItem ? JSON.parse(params.detectedItem as string) : null;
+
   const { addInventoryItem } = useInventory();
-  const [loading, setLoading] = useState(true);
-  const [detectionResult, setDetectionResult] = useState<DetectionResult | null>(null);
-  const [quantity, setQuantity] = useState(1);
-  const [shelfLife, setShelfLife] = useState(7);
 
-  // Helper to get icon from item name
-  const getItemIcon = (itemName: string) => {
-    const name = itemName.toLowerCase().replace('_', '');
-    const iconMap: { [key: string]: any } = {
-      burgerbun: require('../../assets/burgerbun.png'),
-      burger_bun: require('../../assets/burgerbun.png'),
-      beef: require('../../assets/beef.png'),
-      ground_beef: require('../../assets/beef.png'),
-      lettuce: require('../../assets/lettuce.png'),
-      cheese: require('../../assets/cheese.png'),
-      tomato: require('../../assets/tomato.png'),
-      tomatoes: require('../../assets/tomato.png'),
-      onion: require('../../assets/onion.png'),
-    };
-    return iconMap[name] || require('../../assets/burger.png');
+  const [loading, setLoading] = useState(false);
+  const [itemName, setItemName] = useState(detectedItem?.name || '');
+  const [iconKey, setIconKey] = useState(detectedItem?.name ? nameToIconMap[detectedItem.name] : 'burger');
+  const [count, setCount] = useState('1');
+  const [shelfLifeDays, setShelfLifeDays] = useState(
+    detectedItem?.predictedHours ? Math.ceil(detectedItem.predictedHours / 24).toString() : '7'
+  );
+  const [predictedExpiryDate, setPredictedExpiryDate] = useState<Date | null>(
+    detectedItem?.predictedHours ? new Date(Date.now() + detectedItem.predictedHours * 3600 * 1000) : null
+  );
+  const [fetchingPrediction, setFetchingPrediction] = useState(false);
+
+  // Try to fetch prediction from ML API if we don't have predictedHours from camera
+  const [predictionError, setPredictionError] = useState<string | null>(null);
+  const fetchedForRef = useRef<string | null>(null);
+  const requestIdRef = useRef(0);
+
+  const fetchPrediction = async () => {
+    if (!detectedItem || detectedItem.predictedHours) return;
+    // If we've already fetched for this detected item and we already have a prediction, avoid re-fetching
+    if (fetchedForRef.current === detectedItem.name && predictedExpiryDate) return;
+    setPredictionError(null);
+    setFetchingPrediction(true);
+    // mark this ingredient as being fetched
+    fetchedForRef.current = detectedItem.name;
+    // bump request id
+    requestIdRef.current += 1;
+    const localRequestId = requestIdRef.current;
+
+    // Read weather config
+    const extra = Constants.expoConfig?.extra as any;
+    const city = extra?.weatherCity || process.env.EXPO_PUBLIC_WEATHER_CITY || '';
+    const apiKey = extra?.weatherApiKey || process.env.EXPO_PUBLIC_WEATHER_API_KEY || '';
+
+    // Fetch weather if configured
+    const weather = apiKey && city ? await fetchWeatherData(city, apiKey).catch((e) => {
+      console.warn('Weather fetch failed', e);
+      return { temperature: 5, humidity: 50 };
+    }) : { temperature: 5, humidity: 50 };
+
+    // Debug log so browser/dev can confirm a POST attempt
+    console.log('Attempting freshness prediction POST', { ingredient: detectedItem.name, weather, platform: Platform.OS });
+
+    // Retry logic for transient errors (e.g., 502)
+    const maxAttempts = 3;
+    let attempt = 0;
+    let lastError: any = null;
+    while (attempt < maxAttempts) {
+      attempt += 1;
+      try {
+        const hours = await getShelfLifePrediction(detectedItem.name, weather.temperature, weather.humidity, 0);
+        if (hours && typeof hours === 'number') {
+          const days = Math.max(1, Math.ceil(hours / 24));
+          // only apply result if this is the latest request
+          if (localRequestId === requestIdRef.current) {
+            setShelfLifeDays(days.toString());
+            setPredictedExpiryDate(new Date(Date.now() + hours * 3600 * 1000));
+          }
+          lastError = null;
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Prediction attempt ${attempt} failed:`, err?.message || err);
+        // If 502-like, backoff and retry
+        const status = err?.message?.match(/(\d{3})/)?.[1];
+        if (status === '502' && attempt < maxAttempts) {
+          await new Promise((res) => setTimeout(res, 500 * attempt));
+          continue;
+        }
+        break;
+      }
+    }
+
+    if (lastError) {
+      console.warn('Freshness API failed after retries:', lastError);
+      // only update UI if this is the latest request
+      if (localRequestId === requestIdRef.current) {
+        setPredictionError(String(lastError?.message || lastError || 'Unknown error'));
+        setShelfLifeDays('7');
+        setPredictedExpiryDate(new Date(Date.now() + 7 * 24 * 3600 * 1000));
+      }
+    }
+
+    // clear fetching only if this is the latest request
+    if (localRequestId === requestIdRef.current) setFetchingPrediction(false);
   };
 
-  // Fetch detection result from Supabase
   useEffect(() => {
-    const fetchDetectionResult = async () => {
-      try {
-        setLoading(true);
-        
-        // Get current user
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (!user) {
-          Alert.alert('Error', 'User not authenticated');
-          router.back();
-          return;
-        }
+    fetchPrediction();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detectedItem]);
 
-        // Fetch latest detection result for this user
-        let query = supabase
-          .from('detection_results')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(1);
+  // Update icon and expiry if detectedItem changes (from camera)
+  useEffect(() => {
+    if (detectedItem) {
+      setItemName(detectedItem.name);
+      setIconKey(nameToIconMap[detectedItem.name] || 'burger');
 
-        // If detection_id is provided, fetch that specific one
-        if (params.detectionId && params.detectionId !== 'latest') {
-          query = supabase
-            .from('detection_results')
-            .select('*')
-            .eq('id', params.detectionId)
-            .eq('user_id', user.id)
-            .single();
-        }
-
-        const { data, error } = await query;
-
-        if (error) {
-          console.error('Error fetching detection result:', error);
-          Alert.alert('Error', 'Failed to fetch detection results');
-          return;
-        }
-
-        if (data) {
-          const result = Array.isArray(data) ? data[0] : data;
-          setDetectionResult(result);
-          
-          // Set default values from detection
-          if (result.detected_items && result.detected_items.length > 0) {
-            // Use primary item if available
-            const primaryItem = result.primary_item || result.detected_items[0].item_name;
-            // You can extract quantity from detection if available
-          }
-        }
-      } catch (error: any) {
-        console.error('Error:', error);
-        Alert.alert('Error', error.message || 'Failed to load detection results');
-      } finally {
-        setLoading(false);
+      if (detectedItem.predictedHours) {
+        const days = Math.ceil(detectedItem.predictedHours / 24);
+        setShelfLifeDays(days.toString());
+        setPredictedExpiryDate(new Date(Date.now() + detectedItem.predictedHours * 3600 * 1000));
       }
-    };
 
-    fetchDetectionResult();
-  }, [params.detectionId]);
+      // Auto-fill quantity if provided by camera detection
+      if ((detectedItem as any).count !== undefined) {
+        try {
+          const cnt = Number((detectedItem as any).count);
+          if (!isNaN(cnt) && cnt > 0) setCount(cnt.toString());
+        } catch (e) {
+          // ignore malformed count
+        }
+      }
+    }
+  }, [detectedItem]);
 
-  const handleConfirm = async () => {
-    if (!detectionResult) return;
+  // Camera result helper
+  const applyCameraResult = (pred: { class: string; confidence: number; hours_until_expiry?: number }) => {
+    const detectedName = pred.class.toUpperCase();
+    setItemName(detectedName);
+    setIconKey(nameToIconMap[detectedName] || 'burger');
 
-    try {
-      const primaryItem = detectionResult.primary_item || 
-        (detectionResult.detected_items?.[0]?.item_name || 'unknown_item');
-      
-      const icon = getItemIcon(primaryItem);
-      const itemName = primaryItem.toUpperCase().replace('_', ' ');
-
-      // Add to inventory
-      addInventoryItem(itemName, icon, quantity, shelfLife);
-
-      Alert.alert('Success', 'Item added to inventory!', [
-        {
-          text: 'OK',
-          onPress: () => router.push('/(tabs)/inventory'),
-        },
-      ]);
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to add item to inventory');
+    if (pred.hours_until_expiry) {
+      const days = Math.ceil(pred.hours_until_expiry / 24);
+      setShelfLifeDays(days.toString());
+      setPredictedExpiryDate(new Date(Date.now() + pred.hours_until_expiry * 3600 * 1000));
+    } else {
+      setShelfLifeDays('7');
+      setPredictedExpiryDate(new Date(Date.now() + 7 * 24 * 3600 * 1000));
     }
   };
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>IN-VENTO:</Text>
-          <Text style={styles.subtitle}>Intelligent Inventory System</Text>
-        </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4CAF50" />
-          <Text style={styles.loadingText}>Loading detection results...</Text>
-        </View>
-      </View>
-    );
-  }
+  const handleConfirm = async () => {
+    if (!itemName.trim()) return Alert.alert('Invalid Item Name', 'Please enter an item name.');
 
-  if (!detectionResult) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>IN-VENTO:</Text>
-          <Text style={styles.subtitle}>Intelligent Inventory System</Text>
-        </View>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>No detection results found</Text>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <Text style={styles.backButtonText}>Go Back</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+    const countNum = Number(count);
+    if (isNaN(countNum) || countNum <= 0) return Alert.alert('Invalid Count', 'Enter a valid count > 0');
 
-  const primaryItem = detectionResult.primary_item || 
-    (detectionResult.detected_items?.[0]?.item_name || 'unknown_item');
-  const itemName = primaryItem.toUpperCase().replace('_', ' ');
-  const itemIcon = getItemIcon(primaryItem);
-  const avgConfidence = detectionResult.confidence_scores?.length > 0
-    ? (detectionResult.confidence_scores.reduce((a, b) => a + b, 0) / detectionResult.confidence_scores.length * 100).toFixed(1)
-    : 'N/A';
+    const shelfLifeNum = Number(shelfLifeDays);
+    if (isNaN(shelfLifeNum) || shelfLifeNum <= 0) return Alert.alert('Invalid Shelf Life', 'Enter valid days > 0');
+
+    setLoading(true);
+    try {
+      await addInventoryItem(
+        itemName.trim().toUpperCase(),
+        iconKey.toLowerCase(),
+        countNum,
+        shelfLifeNum,
+        predictedExpiryDate || undefined
+      );
+
+      Alert.alert('Item Added', `${itemName} added!`, [{ text: 'OK', onPress: () => router.push('/inventory')}]);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to add item');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>IN-VENTO:</Text>
-        <Text style={styles.subtitle}>Intelligent Inventory System</Text>
+        <Text style={styles.title}>ADD INVENTORY ITEM</Text>
+        <Text style={styles.subtitle}>Enter item details below</Text>
       </View>
 
-      <Text style={styles.sectionTitle}>DETECTION RESULTS</Text>
-
-      {/* Mold Detection Status */}
-      <View style={[styles.moldCard, detectionResult.mold_detected && styles.moldCardWarning]}>
-        <Text style={[styles.moldText, detectionResult.mold_detected && styles.moldTextWarning]}>
-          {detectionResult.mold_detected ? '⚠️ MOLD DETECTED!' : '✅ NO MOLD DETECTED'}
-        </Text>
-      </View>
-
-      {/* Detection Info */}
-      <View style={styles.infoCard}>
-        <Text style={styles.infoLabel}>Confidence: {avgConfidence}%</Text>
-        <Text style={styles.infoLabel}>
-          Items Detected: {detectionResult.detected_items?.length || 0}
-        </Text>
-      </View>
-
-      {/* Item Container */}
-      <View style={styles.itemContainer}>
-        <View style={styles.itemHeader}>
-          <Image source={itemIcon} style={styles.icon} />
-          <Text style={styles.itemText}>{itemName}</Text>
+      {/* Item Name */}
+      <View style={styles.section}>
+        <Text style={styles.label}>Item Name</Text>
+        <View style={styles.pickerWrapper}>
+          <Picker
+            selectedValue={itemName}
+            onValueChange={(value) => {
+              setItemName(value);
+              if (value && nameToIconMap[value]) setIconKey(nameToIconMap[value]);
+            }}
+          >
+            <Picker.Item label="Select an item..." value="" />
+            {Object.keys(nameToIconMap).map((key) => (
+              <Picker.Item key={key} label={key} value={key} />
+            ))}
+          </Picker>
         </View>
 
-        <View style={styles.controlRow}>
-          <Text style={styles.label}>Quantity:</Text>
-          <View style={styles.controlGroup}>
-            <TouchableOpacity
-              style={styles.adjustButton}
-              onPress={() => setQuantity(Math.max(1, quantity - 1))}
-            >
-              <Text style={styles.adjustText}>-</Text>
-            </TouchableOpacity>
-            <Text style={styles.valueText}>{quantity} pc</Text>
-            <TouchableOpacity
-              style={styles.adjustButton}
-              onPress={() => setQuantity(quantity + 1)}
-            >
-              <Text style={styles.adjustText}>+</Text>
+        {itemName && (
+          fetchingPrediction ? (
+            <View style={styles.predictionCard}>
+              <Text style={styles.predictionLabel}>Fetching Prediction...</Text>
+              <Text style={styles.predictionDate}>Loading...</Text>
+              <Text style={styles.predictionShelfLife}>Please wait</Text>
+            </View>
+          ) : predictedExpiryDate ? (
+            <View style={styles.predictionCard}>
+              <Text style={styles.predictionLabel}>Predicted Expiry</Text>
+              <Text style={styles.predictionDate}>{formatDateTime(predictedExpiryDate)}</Text>
+              <Text style={styles.predictionShelfLife}>
+                Shelf life: {shelfLifeDays} day{Number(shelfLifeDays) === 1 ? '' : 's'}
+              </Text>
+            </View>
+          ) : null
+        )}
+        {predictionError && (
+          <View style={{ marginBottom: 12 }}>
+            <Text style={{ color: '#B00020' }}>Prediction error: {predictionError}</Text>
+            <TouchableOpacity onPress={() => fetchPrediction()} style={{ marginTop: 8, padding: 8, backgroundColor: '#4CAF50', borderRadius: 8 }}>
+              <Text style={{ color: '#fff', fontWeight: '600' }}>Retry Prediction</Text>
             </TouchableOpacity>
           </View>
-        </View>
-
-        <View style={styles.controlRow}>
-          <Text style={styles.label}>Shelf Life:</Text>
-          <View style={styles.controlGroup}>
-            <TouchableOpacity
-              style={styles.adjustButton}
-              onPress={() => setShelfLife(Math.max(1, shelfLife - 1))}
-            >
-              <Text style={styles.adjustText}>-</Text>
-            </TouchableOpacity>
-            <Text style={styles.valueText}>{shelfLife} days</Text>
-            <TouchableOpacity
-              style={styles.adjustButton}
-              onPress={() => setShelfLife(shelfLife + 1)}
-            >
-              <Text style={styles.adjustText}>+</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        )}
       </View>
 
-      <TouchableOpacity
-        style={styles.confirmButton}
-        onPress={handleConfirm}
-      >
-        <Text style={styles.confirmText}>ADD TO INVENTORY</Text>
+      {/* Quantity */}
+      <View style={styles.section}>
+        <Text style={styles.label}>Quantity</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter quantity"
+          value={count}
+          onChangeText={setCount}
+          keyboardType="number-pad"
+        />
+      </View>
+
+      {/* Confirm / Cancel */}
+      <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm} disabled={loading}>
+        <Text style={styles.confirmButtonText}>{loading ? 'Adding...' : 'CONFIRM ADD'}</Text>
       </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.cancelButton}
-        onPress={() => router.push('/(tabs)/inventory')}
-      >
-        <Text style={styles.cancelText}>Cancel</Text>
+      <TouchableOpacity style={styles.cancelButton} onPress={() => router.push('/inventory')}>
+        <Text style={styles.cancelButtonText}>Cancel</Text>
       </TouchableOpacity>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F7FA',
-    padding: 20,
-  },
-  header: {
-    alignItems: 'center',
-    marginTop: 30,
-    marginBottom: 10,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#2D5016',
-    letterSpacing: 0.5,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  errorText: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 20,
-  },
-  backButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 20,
-  },
-  backButtonText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 24,
-    marginBottom: 16,
-    color: '#2D5016',
-    letterSpacing: 0.3,
-    textAlign: 'center',
-  },
-  moldCard: {
-    backgroundColor: '#E8F5E9',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
-    alignItems: 'center',
-  },
-  moldCardWarning: {
-    backgroundColor: '#FFF3E0',
-    borderLeftColor: '#FF9800',
-  },
-  moldText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2D5016',
-  },
-  moldTextWarning: {
-    color: '#E65100',
-  },
-  infoCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  infoLabel: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  itemContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
-  },
-  itemHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  icon: {
-    width: 50,
-    height: 50,
-    marginRight: 12,
-  },
-  itemText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1A3D0F',
-    flex: 1,
-  },
-  controlRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginVertical: 12,
-  },
-  label: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '600',
-    flex: 1,
-  },
-  controlGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  adjustButton: {
-    backgroundColor: '#66BB6A',
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#66BB6A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  adjustText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 18,
-  },
-  valueText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2D5016',
-    minWidth: 60,
-    textAlign: 'center',
-  },
-  confirmButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 16,
-    borderRadius: 25,
-    marginTop: 10,
-    shadowColor: '#4CAF50',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 5,
-  },
-  confirmText: {
-    textAlign: 'center',
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    fontSize: 16,
-    letterSpacing: 0.5,
-  },
-  cancelButton: {
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 12,
-    marginBottom: 20,
-  },
-  cancelText: {
-    color: '#666',
-    fontSize: 14,
-  },
+  container: { flex: 1, backgroundColor: '#F5F7FA', padding: 20 },
+  header: { alignItems: 'center', marginTop: 30, marginBottom: 24 },
+  title: { fontSize: 24, fontWeight: 'bold', color: '#2D5016', letterSpacing: 0.5 },
+  subtitle: { fontSize: 14, color: '#666', marginTop: 4 },
+  section: { marginBottom: 24 },
+  label: { fontSize: 16, fontWeight: '600', color: '#1A3D0F', marginBottom: 8 },
+  input: { backgroundColor: '#FFF', padding: 12, borderRadius: 12, fontSize: 15, borderWidth: 1, borderColor: '#E0E0E0', marginBottom: 12 },
+  pickerWrapper: { backgroundColor: '#FFF', borderRadius: 12, borderWidth: 1, borderColor: '#E0E0E0', marginBottom: 12 },
+  predictionCard: { backgroundColor: '#E8F5E9', borderRadius: 12, padding: 12, marginBottom: 12, borderLeftWidth: 4, borderLeftColor: '#4CAF50' },
+  predictionLabel: { fontSize: 12, fontWeight: '600', color: '#2D5016', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 4 },
+  predictionDate: { fontSize: 18, fontWeight: 'bold', color: '#1A3D0F', marginBottom: 4 },
+  predictionShelfLife: { fontSize: 13, color: '#555', fontWeight: '500' },
+  confirmButton: { backgroundColor: '#4CAF50', paddingVertical: 16, borderRadius: 25, alignItems: 'center', marginTop: 8, marginBottom: 12, shadowColor: '#4CAF50', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 5 },
+  confirmButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16, letterSpacing: 0.5 },
+  cancelButton: { paddingVertical: 12, alignItems: 'center', marginBottom: 20 },
+  cancelButtonText: { color: '#666', fontSize: 14 },
 });
