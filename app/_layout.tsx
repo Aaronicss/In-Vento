@@ -13,6 +13,9 @@ export default function RootLayout() {
       <InventoryProvider>
         <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <Stack screenOptions={{ headerShown: false }}>
+            {/* Index/Auth Check */}
+            <Stack.Screen name="index" />
+
             {/* Login Screen */}
             <Stack.Screen name="login" />
 
@@ -24,6 +27,9 @@ export default function RootLayout() {
 
             {/* Add Inventory Item Screen */}
             <Stack.Screen name="add-inventory-item" />
+
+            {/* Inventory Stats Screen */}
+            <Stack.Screen name="inventoryStats" />
 
             {/* Optional Modal */}
             <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />

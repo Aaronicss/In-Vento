@@ -14,22 +14,32 @@ export default function TabLayout() {
       screenOptions={{
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
-        tabBarStyle: { display: "none" }, 
         tabBarButton: HapticTab,
       }}>
       <Tabs.Screen
         name="home"
         options={{
           title: 'Home',
-          tabBarStyle: { display: "none" },
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
         }}
-      /><Tabs.Screen
+      />
+      <Tabs.Screen
         name="inventory"
         options={{
-          tabBarStyle: { display: "none" },
           title: 'Inventory',
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="camera"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="detection-results"
+        options={{
+          href: null,
         }}
       />
     </Tabs>
