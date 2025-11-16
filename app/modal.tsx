@@ -8,9 +8,8 @@ export default function ModalScreen() {
   return (
     <ThemedView style={styles.container}>
       <ThemedText type="title">This is a modal</ThemedText>
-      <Link href="/" dismissTo style={styles.link}>
+      <Link href={"/" as any}>Go Home</Link>
         <ThemedText type="link">Go to home screen</ThemedText>
-      </Link>
     </ThemedView>
   );
 }
