@@ -122,25 +122,28 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.headerTitle}>SCAN INVENTORY</Text>
+      <View style={styles.headerGradient}>
+        <Text style={styles.headerTitle}>📸 SCAN INVENTORY</Text>
+        <Text style={styles.headerSubtitle}>Point at items to detect & analyze</Text>
+      </View>
 
       <CameraView ref={cameraRef} style={styles.camera} />
 
       <View style={styles.captureContainer}>
         <TouchableOpacity
-          style={[styles.captureButton, loading && { opacity: 0.5 }]}
+          style={[styles.captureButton, loading && { opacity: 0.6 }]}
           onPress={takePicture}
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#fff" size="large" />
+            <ActivityIndicator color="#1A3D0F" size="large" />
           ) : (
             <View style={styles.captureButtonInner} />
           )}
         </TouchableOpacity>
 
         <Text style={styles.captureHint}>
-          {loading ? "Detecting..." : "Tap to Capture"}
+          {loading ? "🔍 Analyzing..." : "📷 Tap to Capture"}
         </Text>
       </View>
     </View>
@@ -148,62 +151,98 @@ export default function CameraScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5F7FA" },
+  container: { flex: 1, backgroundColor: "#0F2E08" },
+  headerGradient: {
+    paddingTop: 50,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    backgroundColor: "#1A3D0F",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(76, 175, 80, 0.2)",
+  },
   headerTitle: {
     textAlign: "center",
-    paddingTop: 50,
-    fontSize: 22,
-    fontWeight: "bold",
+    fontSize: 28,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    letterSpacing: 0.5,
+  },
+  headerSubtitle: {
+    textAlign: "center",
+    fontSize: 14,
+    color: "rgba(255, 255, 255, 0.8)",
+    marginTop: 8,
+    fontWeight: "500",
   },
   title: {
-  fontSize: 24,
-  fontWeight: 'bold',
-  textAlign: 'center',
-  marginBottom: 10,
-},
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 10,
+    color: '#FFFFFF',
+  },
   camera: {
     flex: 1,
     margin: 20,
-    borderRadius: 20,
+    borderRadius: 24,
     overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
   },
   captureContainer: {
     position: "absolute",
-    bottom: 40,
+    bottom: 50,
     alignSelf: "center",
     alignItems: "center",
   },
   captureButton: {
     backgroundColor: "#4CAF50",
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 5,
-    borderColor: "#fff",
+    borderWidth: 6,
+    borderColor: "#FFFFFF",
+    shadowColor: "#4CAF50",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 10,
   },
   captureButtonInner: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: "#fff",
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    backgroundColor: "#FFFFFF",
   },
   captureHint: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#333",
+    marginTop: 16,
+    fontSize: 16,
+    color: "#FFFFFF",
+    fontWeight: "600",
+    letterSpacing: 0.3,
   },
   permissionContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: "#1A3D0F",
   },
   permissionButton: {
     marginTop: 20,
     backgroundColor: "#4CAF50",
-    padding: 15,
-    borderRadius: 10,
+    paddingVertical: 16,
+    paddingHorizontal: 40,
+    borderRadius: 12,
+    shadowColor: "#4CAF50",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 5,
   },
-  permissionButtonText: { color: "#fff", fontWeight: "bold" },
+  permissionButtonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
 });

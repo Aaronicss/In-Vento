@@ -30,11 +30,11 @@ export default function InventoryStats() {
   const shortLabels = inventoryItems.map(item => truncateLabel(item.name, 8));
 
   const barChartConfig = {
-    backgroundGradientFrom: '#F5F7FA',
-    backgroundGradientTo: '#F5F7FA',
+    backgroundGradientFrom: '#1A3D0F',
+    backgroundGradientTo: '#1A3D0F',
     decimalPlaces: 0,
     color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`, // green
-    labelColor: (opacity = 1) => `rgba(0,0,0,${opacity})`,
+    labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
     style: {
       borderRadius: 16,
     },
@@ -45,7 +45,7 @@ export default function InventoryStats() {
     name: item.name,
     count: item.count,
     color: `hsl(${(index / inventoryItems.length) * 360}, 70%, 50%)`,
-    legendFontColor: '#333',
+    legendFontColor: '#FFFFFF',
     legendFontSize: 14,
     value: item.count,
   }));
@@ -88,13 +88,13 @@ export default function InventoryStats() {
           width={Math.max(screenWidth - 40, inventoryItems.length * 60)} // dynamic width
           height={300} // enough vertical space for bars
           chartConfig={{
-            backgroundGradientFrom: '#F5F7FA',
-            backgroundGradientTo: '#F5F7FA',
+            backgroundGradientFrom: '#1A3D0F',
+            backgroundGradientTo: '#1A3D0F',
             decimalPlaces: 0,
             color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`,
-            labelColor: (opacity = 1) => `rgba(0,0,0,${opacity})`,
+            labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
             style: { borderRadius: 12, paddingBottom: 12 }, // smaller padding now sufficient for rotated labels
-            propsForBackgroundLines: { stroke: '#E0E0E0', strokeDasharray: '' },
+            propsForBackgroundLines: { stroke: 'rgba(76, 175, 80, 0.2)', strokeDasharray: '' },
           }}
           verticalLabelRotation={45} // reduce rotation so labels don't get clipped
           fromZero
@@ -122,7 +122,14 @@ export default function InventoryStats() {
             data={pieData}
             width={screenWidth - 40}
             height={220}
-            chartConfig={barChartConfig}
+            chartConfig={{
+              backgroundGradientFrom: '#1A3D0F',
+              backgroundGradientTo: '#1A3D0F',
+              decimalPlaces: 0,
+              color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`,
+              labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+              style: { borderRadius: 16 },
+            }}
             accessor="value"
             backgroundColor="transparent"
             paddingLeft="15"
@@ -135,9 +142,9 @@ export default function InventoryStats() {
 
       <View style={styles.statsSection}>
         <Text style={styles.statsTitle}>Summary Stats</Text>
-        <Text>Total Items: {totalItems}</Text>
-        <Text>Total Types: {totalTypes}</Text>
-        <Text>Average Count per Item: {avgCount}</Text>
+        <Text style={styles.statText}>Total Items: {totalItems}</Text>
+        <Text style={styles.statText}>Total Types: {totalTypes}</Text>
+        <Text style={styles.statText}>Average Count per Item: {avgCount}</Text>
       </View>
     </ScrollView>
   );
@@ -146,13 +153,13 @@ export default function InventoryStats() {
 const styles = StyleSheet.create({
 container: {
     flex: 1,
-    backgroundColor: "#F5F7FA",
+    backgroundColor: "#0F2E08",
     padding: 20,
 },
 headerContainer: {
     position: 'relative',
     marginBottom: 10,
-    alignItems: 'center', // centers the title horizontally
+    alignItems: 'center',
 },
 backButton: {
     position: 'absolute',
@@ -160,23 +167,26 @@ backButton: {
     top: 0,
     paddingVertical: 8,
     paddingHorizontal: 16,
-    backgroundColor: "#E8F5E9",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#4CAF50",
-    margin: 16,
+    backgroundColor: "#4CAF50",
+    borderRadius: 12,
+    borderWidth: 0,
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
 },
       
 backButtonText: {
-    color: "#2D5016",
-    fontWeight: "600",
+    color: "#FFFFFF",
+    fontWeight: "700",
     fontSize: 14,
 },
       
 title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2D5016',
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#FFFFFF',
     textAlign: 'center',
     paddingTop: 40,
     paddingVertical: 8,
@@ -189,29 +199,37 @@ title: {
   },
   chartTitle: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#1A3D0F',
+    fontWeight: '700',
+    color: '#4CAF50',
     marginBottom: 8,
   },
   statsSection: {
     padding: 16,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#1A3D0F',
     borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(76, 175, 80, 0.2)',
   },
   statsTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '800',
     marginBottom: 8,
-    color: '#2D5016',
+    color: '#4CAF50',
+  },
+  statText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginVertical: 4,
   },
   noData: {
     textAlign: 'center',
-    color: '#999',
+    color: 'rgba(255, 255, 255, 0.6)',
     marginVertical: 20,
   },
   legendContainer: {
@@ -221,17 +239,18 @@ title: {
     gap: 8,
   },
   legendItem: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    backgroundColor: 'rgba(76, 175, 80, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 8,
     marginRight: 8,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: 'rgba(76, 175, 80, 0.3)',
   },
   legendText: {
     fontSize: 12,
-    color: '#333',
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
 });
