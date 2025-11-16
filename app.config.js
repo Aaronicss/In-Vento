@@ -1,5 +1,4 @@
 // Load environment variables from .env file if it exists
-// Install dotenv: npm install --save-dev dotenv
 try {
   require('dotenv').config({ path: '.env' });
 } catch (error) {
@@ -17,14 +16,27 @@ module.exports = {
     scheme: "invento",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
+
+    // 🔹 Extra config (public and sensitive variables)
     extra: {
-      weatherCity: process.env.WEATHER_CITY || "Bacoor",
+      // Public variables (prefixed EXPO_PUBLIC_) – safe to show in app bundle
+      weatherCity: process.env.EXPO_PUBLIC_WEATHER_CITY || "Dasmarinas",
+
+      // Sensitive variables – keep secret, not visible in the app bundle
       weatherApiKey: process.env.WEATHER_API_KEY || "",
+
+      // EAS Project ID (required)
+      eas: {
+        projectId: "2eebaf7b-ff06-4d7c-a1b6-6f26e877d869",
+      },
     },
+
     ios: {
       supportsTablet: true,
     },
+
     android: {
+      package: "com.aaronlazaro.invento", // REQUIRED for EAS build
       adaptiveIcon: {
         backgroundColor: "#E6F4FE",
         foregroundImage: "./assets/images/android-icon-foreground.png",
@@ -34,10 +46,12 @@ module.exports = {
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
     },
+
     web: {
       output: "static",
       favicon: "./assets/images/favicon.png",
     },
+
     plugins: [
       "expo-router",
       [
@@ -47,16 +61,14 @@ module.exports = {
           imageWidth: 200,
           resizeMode: "contain",
           backgroundColor: "#ffffff",
-          dark: {
-            backgroundColor: "#000000",
-          },
+          dark: { backgroundColor: "#000000" },
         },
       ],
     ],
+
     experiments: {
       typedRoutes: true,
       reactCompiler: true,
     },
   },
 };
-
