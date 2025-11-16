@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontWeight: 'bold', marginBottom: 5 },
   subtitle: { fontSize: 14, marginBottom: 20 },
   loginText: { fontSize: 18, fontWeight: 'bold', marginBottom: 20 },
-  image: { width: 200, height: 200, borderRadius: 20, marginBottom: 20 },
+  image: { width: 200, height: 200, borderRadius: 20, marginBottom: 20, resizeMode: "contain" },
   input: {
     width: '80%',
     backgroundColor: '#ddd',

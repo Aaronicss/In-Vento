@@ -433,7 +433,7 @@ const styles = StyleSheet.create({
   },
   itemName: {
     fontWeight: "bold",
-    fontSize: 16,
+    fontSize: 20,
     color: "#1A3D0F",
     flex: 1,
     letterSpacing: 0.3,
@@ -459,7 +459,7 @@ const styles = StyleSheet.create({
   statusTag: {
     borderRadius: 12,
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 2,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
@@ -468,7 +468,7 @@ const styles = StyleSheet.create({
   },
   statusText: {
     color: "white",
-    fontSize: 11,
+    fontSize: 16,
     fontWeight: "600",
     letterSpacing: 0.2,
   },
@@ -495,7 +495,7 @@ const styles = StyleSheet.create({
   smallButton: {
     backgroundColor: "#66BB6A",
     paddingHorizontal: 25,
-    paddingVertical: 6,
+    paddingVertical: 0,
     borderRadius: 12,
     minWidth: 36,
     alignItems: "center",

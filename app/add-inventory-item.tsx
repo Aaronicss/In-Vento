@@ -180,8 +180,6 @@ export default function AddInventoryItemScreen() {
   <Picker.Item label="CHEESE" value="CHEESE" />
   <Picker.Item label="TOMATO" value="TOMATO" />
   <Picker.Item label="ONION" value="ONION" />
-  <Picker.Item label="BURGER" value="BURGER" />
-  <Picker.Item label="DRINK" value="DRINK" />
 </Picker></View>
 
   {/* Prediction UI: show loading while fetching, otherwise show the computed expiry */}
@@ -214,21 +212,6 @@ export default function AddInventoryItemScreen() {
           keyboardType="number-pad"
         />
       </View>
-
-      {/* Shelf Life Input */}
-      <View style={styles.section}>
-        <Text style={styles.label}>Shelf Life (Days)</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Enter shelf life in days (e.g., 7)"
-          value={shelfLifeDays}
-          onChangeText={setShelfLifeDays}
-          keyboardType="number-pad"
-        />
-      </View>
-
-      
-
       {/* Confirm Button */}
       <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
         <Text style={styles.confirmButtonText}>CONFIRM ADD</Text>

@@ -344,6 +344,7 @@ const styles = StyleSheet.create({
     width: 28, 
     height: 28, 
     marginRight: 12,
+    resizeMode: "contain",
   },
   itemText: { 
     flex: 1,
